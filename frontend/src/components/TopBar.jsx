@@ -11,7 +11,7 @@ import {
 const TITLES = {
   '/dashboard': 'Dashboard', '/log-trade': 'Log Trade', '/calendar': 'Calendar',
   '/strategies': 'Strategies', '/ai-insights': 'AI Insights', '/vision-board': 'Vision Board',
-  '/zen-zone': 'Zen Zone', '/milestones': 'Milestones', '/backtest': 'Backtest',
+  '/zen-zone': 'Zen Zone', '/milestones': 'Trading Progress', '/backtest': 'Backtest',
 };
 
 export default function TopBar({ onToggleSidebar, onAddTrade }) {

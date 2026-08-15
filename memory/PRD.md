@@ -66,6 +66,22 @@ See `/app/memory/test_credentials.md`.
       `Login.jsx` "Continue with Google" button. Playbook at `/app/auth_testing.md`.
     - Verified via curl: cookie session, bearer session, no-auth 401, logout invalidation, legacy JWT login all pass.
       Full external Google redirect needs a real Google account (follows Emergent playbook exactly).
+  - Added durable **object storage** for trade media (`server.py` init_storage/storage_put/storage_get):
+    migrated photo uploads off local disk, added **video** support (MP4/WebM), 15MB image / 100MB video
+    limits, upload progress bar; media served by unguessable token (image or video). Redesigned the Trade Log
+    gallery to a uniform aspect-tile grid with video badge/play overlay. Verified 100% (iteration_3.json).
+  - Built **Trading Progress** (Milestones 2.0):
+    - Backend (`progress.py` + `server.py`): `GET /api/progress` (real-data stats, streaks, personal records,
+      daily/weekly/monthly, discipline score, XP/level, goals integration, achievement evaluation, history,
+      auto-seed 15 defaults, persists unlocked_at). Fully customizable DB-backed achievements:
+      GET/POST/PUT/DELETE `/api/achievements`. `PUT /api/progress/settings` (toggles + XP values). New
+      `achievements` collection. requirement_types: trade_count, win_streak, profit, win_rate, session_count,
+      strategy_count, journal_trades, plan_followed, no_revenge, active_days, screenshots.
+    - Frontend (`pages/Milestones.jsx` + `components/progress/*`): premium page — hero, 4 stat cards,
+      level/XP bar, personal records, Today/Week/Month, discipline breakdown, current goals, achievements
+      grid (locked/unlocked, category filter, detail dialog), achievement builder, customize panel, history,
+      count-up + animated bars, unlock toasts, real-time refetch on data.trades change, empty state.
+      Nav label 'Progress', page title 'Trading Progress'. Verified 100% (iteration_4.json).
 
 ## Backlog / Notes
 - P2: `DELETE /api/trades` currently also deletes accounts (semantically overloaded). Consider splitting

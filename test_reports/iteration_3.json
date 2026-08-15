@@ -1,0 +1,61 @@
+{
+  "summary": "Backend + frontend testing of the new object-storage media pipeline (image + video uploads) on Trade Sentinel. Backend pytest suite (7/7 PASS) validates login, image upload+serve, video upload+serve, mime-type rejection, auth requirement, invalid-token 404, and reorder+persistence. Frontend Playwright validated the full UI flow: login, open Edit modal, upload image + fake mp4 via the media dropzone, uniform grid tiles rendered (data-testid media-tile), VIDEO badge + play overlay on the video tile, served token URLs return 200 with correct content-types, lightbox opens (data-testid lightbox-close), ESC and X both close it, delete (media-delete) removes the tile and the served URL immediately returns 404, and persistence confirmed via GET /api/trades/{id}/photos (kind='video', mime_type='video/mp4', coverUrl updated).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/photos/{token}/file", "issue": "HEAD requests return 405 (only GET registered). Not blocking – <img>/<video> tags use GET – but some CDNs/proxies preflight with HEAD; consider adding HEAD support or a 200 fallback."},
+      {"endpoint": "DELETE /api/photos/{id}", "issue": "Object-storage blob is NOT deleted from the bucket – only the DB record is removed (comment in review confirms this is intentional because object storage has no delete API). Storage will grow unbounded per user; document a retention/cleanup plan."},
+      {"endpoint": "POST /api/trades/{id}/photos", "issue": "MIME-type validation trusts the client-provided Content-Type (a .txt renamed with content_type=image/png would pass). Consider magic-byte sniffing for defense-in-depth."},
+      {"endpoint": "GET /api/trades/{id}/photos ordering", "issue": "display_order is not re-compacted after a delete – after deleting the first uploaded item the remaining item still has display_order=1. Cosmetic; doesn't break rendering because the list is sorted by that field."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Lightbox / Edit modal", "issues": ["Pressing ESC inside the Lightbox closes the lightbox but the underlying Radix Dialog also listens for ESC – in one run the parent modal appeared to receive the ESC after the lightbox unmounted. Consider stopping propagation on the ESC handler in TradePhotos Lightbox so it never bubbles to the Dialog."]},
+      {"screen": "Edit Trade dialog", "issues": ["Console warning: 'Missing Description or aria-describedby={undefined} for DialogContent' – add DialogDescription for a11y."]}
+    ]
+  },
+  "acceptance_test_results": {
+    "auth_login": "PASS – JWT returned as 'token' (note: response key is 'token', not 'access_token').",
+    "image_upload_object_storage": "PASS – uploaded PNG returned kind='image', mime_type='image/png', file_url token, served GET → 200 image/png, byte-length matches file_size.",
+    "video_upload_mp4": "PASS – uploaded fake MP4 returned kind='video', mime_type='video/mp4', served GET → 200 video/mp4. Tile shows 'VIDEO' badge and play overlay.",
+    "uniform_grid_tiles": "PASS – tiles rendered with data-testid='media-tile', 2 tiles side-by-side in the grid.",
+    "lightbox_open_image_and_video": "PASS – lightbox-close / prev / next data-testids present.",
+    "lightbox_close_esc_and_x": "PASS – both ESC key and X button close the lightbox portal.",
+    "delete_tile_and_404": "PASS – clicking media-delete removed the tile; the previously served token URL now returns 404 (object no longer accessible to the user).",
+    "persistence_after_reload": "PASS – GET /api/trades/{id}/photos returns the remaining video record with correct kind/mime; trade.photoCount and coverUrl updated.",
+    "reject_bad_mime": "PASS – POST with text/plain returns 400.",
+    "upload_requires_auth": "PASS – anonymous POST returns 401/403.",
+    "reorder": "PASS – PUT /api/trades/{id}/photos/order updates display_order correctly.",
+    "regression_login_dashboard": "PASS – login + dashboard + Log Trade page load correctly; existing demo data intact."
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_media_storage.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "(Optional a11y) Add DialogDescription to Edit Trade modal to silence Radix warning.",
+    "(Optional UX) Stop ESC propagation in Lightbox so it never risks closing the underlying Dialog.",
+    "(Optional hardening) Sniff magic bytes for uploaded media instead of trusting client Content-Type.",
+    "(Optional cleanup) Re-compact display_order after DELETE /api/photos/{id}.",
+    "(Optional) Support HEAD on /api/photos/{token}/file."
+  ],
+  "critical_code_review_comments": [
+    "server.py:426 `_delete_trade_photos` only removes disk-backed files; when storage='object' the object-storage blob is not deleted (documented limitation, but log a TODO in code).",
+    "server.py:458 MIME check relies on UploadFile.content_type (client-controlled). Add server-side sniffing.",
+    "server.py:508 `serve_photo` returns Response with in-memory bytes for object-storage items – fine for the current 15MB image / 100MB video limits, but consider StreamingResponse for large videos to reduce memory pressure.",
+    "TradePhotos.jsx Lightbox: keyboard handler should call e.stopPropagation() on Escape so it does not also close the parent Radix Dialog."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_media_storage.py (new)"
+  ],
+  "success_rate": {"backend": "100% (7/7)", "frontend": "100% (all acceptance flows)"},
+  "test_credentials": "admin@tradesentinel.com / Sentinel@2025 (from /app/memory/test_credentials.md). Login response key is 'token' (not 'access_token').",
+  "seed_data_creation": "POST /api/trades/demo used to ensure 10 demo trades + 2 accounts. Test uploads (PNG + fake MP4) were attached to the first demo trade; the PNG was deleted during the flow, the video remained (photoCount=1, coverUrl set).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Object storage media pipeline is working end-to-end. One remaining media record (video/mp4, ~284 bytes) exists on trade t_703d7015c7 from testing – harmless. When testing, remember: login response key is 'token', not 'access_token'; run pytest with `-o addopts=''` because pytest.ini enables xdist by default. Frontend uses Radix Dialog + a document.body portal for the Lightbox; use data-testid='media-tile' / 'media-delete' / 'media-dropzone' / 'media-file-input' / 'lightbox-close|prev|next'.",
+  "rca of the issue": "N/A – no functional bugs. Minor observations only."
+}

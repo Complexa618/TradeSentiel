@@ -154,15 +154,27 @@ export function AppProvider({ children }) {
     return res.data;
   }, []);
 
-  const uploadPhotos = useCallback(async (tradeId, files) => {
+  const uploadPhotos = useCallback(async (tradeId, files, onProgress) => {
     const fd = new FormData();
     files.forEach((f) => fd.append('files', f));
-    const res = await api.post(`/trades/${tradeId}/photos`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+    const res = await api.post(`/trades/${tradeId}/photos`, fd, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      onUploadProgress: (e) => {
+        if (onProgress && e.total) onProgress(Math.round((e.loaded / e.total) * 100));
+      },
+    });
     return res.data;
   }, []);
   const listPhotos = useCallback(async (tradeId) => (await api.get(`/trades/${tradeId}/photos`)).data, []);
   const deletePhoto = useCallback(async (id) => (await api.delete(`/photos/${id}`)).data, []);
   const reorderPhotos = useCallback(async (tradeId, ids) => (await api.put(`/trades/${tradeId}/photos/order`, ids)).data, []);
+
+  // --- Trading Progress / Achievements ---
+  const getProgress = useCallback(async () => (await api.get('/progress')).data, []);
+  const createAchievement = useCallback(async (body) => (await api.post('/achievements', body)).data, []);
+  const updateAchievement = useCallback(async (id, body) => (await api.put(`/achievements/${id}`, body)).data, []);
+  const deleteAchievement = useCallback(async (id) => (await api.delete(`/achievements/${id}`)).data, []);
+  const saveProgressSettings = useCallback(async (body) => (await api.put('/progress/settings', body)).data, []);
 
   const value = useMemo(() => ({
     user, data, ready,
@@ -170,7 +182,8 @@ export function AppProvider({ children }) {
     addTrade, updateTrade, deleteTrade, loadDemo, clearData,
     addAccount, deleteAccount, updateGoal, saveGoals, setSettings, fetchEconomicCalendar,
     uploadPhotos, listPhotos, deletePhoto, reorderPhotos,
-  }), [user, data, ready, signup, login, logout, googleLogin, addTrade, updateTrade, deleteTrade, loadDemo, clearData, addAccount, deleteAccount, updateGoal, saveGoals, setSettings, fetchEconomicCalendar, uploadPhotos, listPhotos, deletePhoto, reorderPhotos]);
+    getProgress, createAchievement, updateAchievement, deleteAchievement, saveProgressSettings,
+  }), [user, data, ready, signup, login, logout, googleLogin, addTrade, updateTrade, deleteTrade, loadDemo, clearData, addAccount, deleteAccount, updateGoal, saveGoals, setSettings, fetchEconomicCalendar, uploadPhotos, listPhotos, deletePhoto, reorderPhotos, getProgress, createAchievement, updateAchievement, deleteAchievement, saveProgressSettings]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }

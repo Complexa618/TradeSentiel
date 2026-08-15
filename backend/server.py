@@ -19,6 +19,7 @@ import time as _time
 from fastapi import UploadFile, File
 from fastapi.responses import FileResponse
 import shutil
+import progress
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -38,8 +39,49 @@ security = HTTPBearer(auto_error=False)
 
 UPLOAD_DIR = ROOT_DIR / 'uploads'
 UPLOAD_DIR.mkdir(exist_ok=True)
-ALLOWED_IMAGE_MIME = {'image/jpeg', 'image/jpg', 'image/png', 'image/webp'}
-MAX_PHOTO_BYTES = 10 * 1024 * 1024  # 10 MB
+ALLOWED_IMAGE_MIME = {'image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/gif'}
+ALLOWED_VIDEO_MIME = {'video/mp4', 'video/webm', 'video/quicktime', 'video/ogg'}
+ALLOWED_MEDIA_MIME = ALLOWED_IMAGE_MIME | ALLOWED_VIDEO_MIME
+MAX_PHOTO_BYTES = 15 * 1024 * 1024   # 15 MB for images
+MAX_VIDEO_BYTES = 100 * 1024 * 1024  # 100 MB for videos
+
+# ---------------- Object Storage (durable cloud storage) ----------------
+STORAGE_BASE = (os.environ.get("INTEGRATION_PROXY_URL") or "").strip() or "https://integrations.emergentagent.com"
+STORAGE_URL = STORAGE_BASE.rstrip("/") + "/objstore/api/v1/storage"
+EMERGENT_KEY = os.environ.get("EMERGENT_LLM_KEY")
+STORAGE_APP = "trade-sentinel"
+_storage_key = None
+
+def init_storage(force: bool = False):
+    global _storage_key
+    if _storage_key and not force:
+        return _storage_key
+    resp = requests.post(f"{STORAGE_URL}/init", json={"emergent_key": EMERGENT_KEY}, timeout=30)
+    resp.raise_for_status()
+    _storage_key = resp.json()["storage_key"]
+    return _storage_key
+
+def storage_put(path: str, data: bytes, content_type: str) -> dict:
+    key = init_storage()
+    def _do(k):
+        return requests.put(f"{STORAGE_URL}/objects/{path}",
+                            headers={"X-Storage-Key": k, "Content-Type": content_type},
+                            data=data, timeout=180)
+    r = _do(key)
+    if r.status_code == 404:  # dead cached key -> mint a fresh one and retry once
+        r = _do(init_storage(force=True))
+    r.raise_for_status()
+    return r.json()
+
+def storage_get(path: str):
+    key = init_storage()
+    def _do(k):
+        return requests.get(f"{STORAGE_URL}/objects/{path}", headers={"X-Storage-Key": k}, timeout=120)
+    r = _do(key)
+    if r.status_code == 404:
+        r = _do(init_storage(force=True))
+    r.raise_for_status()
+    return r.content, r.headers.get("Content-Type", "application/octet-stream")
 
 app = FastAPI()
 api = APIRouter(prefix="/api")
@@ -371,11 +413,136 @@ async def put_settings(body: SettingsIn, user: dict = Depends(get_current_user))
     return settings
 
 
+# ---------------- Trading Progress & Achievements ----------------
+DEFAULT_PROGRESS_PREFS = {
+    "achievements": True, "streaks": True, "xp": True,
+    "discipline": True, "notifications": True,
+    "xp": {},  # per-value overrides live here when customized
+}
+PROGRESS_TOGGLES = {"achievementsEnabled", "streaksEnabled", "xpEnabled", "disciplineEnabled", "notificationsEnabled"}
+
+class AchievementIn(BaseModel):
+    title: str
+    description: str = ""
+    category: str = "Trading"
+    icon: str = "Trophy"
+    requirement_type: str = "trade_count"
+    requirement_value: float = 1
+    requirement_meta: Optional[str] = None
+    is_active: bool = True
+    display_order: Optional[int] = None
+
+def _prefs_of(user: dict) -> dict:
+    p = (user.get("settings") or {}).get("progress") or {}
+    return {
+        "achievementsEnabled": p.get("achievementsEnabled", True),
+        "streaksEnabled": p.get("streaksEnabled", True),
+        "xpEnabled": p.get("xpEnabled", True),
+        "disciplineEnabled": p.get("disciplineEnabled", True),
+        "notificationsEnabled": p.get("notificationsEnabled", True),
+        "xp": p.get("xp", {}),
+    }
+
+async def _ensure_default_achievements(uid: str):
+    if await db.achievements.count_documents({"user_id": uid}) > 0:
+        return
+    docs = []
+    for i, (title, desc, cat, icon, rtype, rval, meta) in enumerate(progress.DEFAULT_ACHIEVEMENTS):
+        docs.append({
+            "id": "ach_" + uuid.uuid4().hex[:10], "user_id": uid, "title": title, "description": desc,
+            "category": cat, "icon": icon, "requirement_type": rtype, "requirement_value": float(rval),
+            "requirement_meta": meta, "is_active": True, "is_custom": False, "display_order": i,
+            "unlocked_at": None, "created_at": now_iso(), "updated_at": now_iso(),
+        })
+    if docs:
+        await db.achievements.insert_many(docs)
+
+@api.get("/progress")
+async def get_progress(user: dict = Depends(get_current_user)):
+    uid = user["id"]
+    await _ensure_default_achievements(uid)
+    trades = await db.trades.find({"user_id": uid}).to_list(5000)
+    trades = [clean(t) for t in trades]
+    achievements = [clean(a) for a in await db.achievements.find({"user_id": uid}).sort("display_order", 1).to_list(500)]
+    goals = user.get("goals", DEFAULT_GOALS)
+    prefs = _prefs_of(user)
+    result = progress.compute_progress(trades, goals, achievements, prefs)
+
+    # Persist unlock/regression state so history + "newly unlocked" work across sessions.
+    now = now_iso()
+    for a in result["achievements"]:
+        if a.pop("_set_unlocked_at", False):
+            await db.achievements.update_one({"id": a["id"], "user_id": uid}, {"$set": {"unlocked_at": now}})
+            a["unlocked_at"] = now
+        if a.pop("_clear_unlocked_at", False):
+            await db.achievements.update_one({"id": a["id"], "user_id": uid}, {"$set": {"unlocked_at": None}})
+            a["unlocked_at"] = None
+    # Suppress notifications on the very first computation (avoid a flood on first load)
+    if not (user.get("settings", {}).get("progress", {}).get("seeded")):
+        result["newlyUnlocked"] = []
+        settings = user.get("settings", {"hideBalance": False, "hideUsername": False})
+        settings.setdefault("progress", {})["seeded"] = True
+        await db.users.update_one({"id": uid}, {"$set": {"settings": settings}})
+    return result
+
+@api.get("/achievements")
+async def list_achievements(user: dict = Depends(get_current_user)):
+    await _ensure_default_achievements(user["id"])
+    items = await db.achievements.find({"user_id": user["id"]}).sort("display_order", 1).to_list(500)
+    return [clean(a) for a in items]
+
+@api.post("/achievements")
+async def create_achievement(body: AchievementIn, user: dict = Depends(get_current_user)):
+    count = await db.achievements.count_documents({"user_id": user["id"]})
+    doc = {
+        "id": "ach_" + uuid.uuid4().hex[:10], "user_id": user["id"],
+        **body.dict(), "is_custom": True,
+        "display_order": body.display_order if body.display_order is not None else count,
+        "unlocked_at": None, "created_at": now_iso(), "updated_at": now_iso(),
+    }
+    await db.achievements.insert_one(dict(doc))
+    return clean(doc)
+
+@api.put("/achievements/{aid}")
+async def update_achievement(aid: str, body: AchievementIn, user: dict = Depends(get_current_user)):
+    a = await db.achievements.find_one({"id": aid, "user_id": user["id"]})
+    if not a:
+        raise HTTPException(status_code=404, detail="Achievement not found")
+    patch = {k: v for k, v in body.dict().items() if v is not None or k == "requirement_meta"}
+    patch["updated_at"] = now_iso()
+    patch["unlocked_at"] = None  # re-evaluate against the new requirement
+    await db.achievements.update_one({"id": aid, "user_id": user["id"]}, {"$set": patch})
+    updated = await db.achievements.find_one({"id": aid, "user_id": user["id"]})
+    return clean(updated)
+
+@api.delete("/achievements/{aid}")
+async def delete_achievement(aid: str, user: dict = Depends(get_current_user)):
+    r = await db.achievements.delete_one({"id": aid, "user_id": user["id"]})
+    if r.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Achievement not found")
+    return {"ok": True}
+
+@api.put("/progress/settings")
+async def update_progress_settings(body: dict, user: dict = Depends(get_current_user)):
+    settings = user.get("settings", {"hideBalance": False, "hideUsername": False})
+    prog = settings.get("progress", {})
+    for k, v in body.items():
+        if k in PROGRESS_TOGGLES:
+            prog[k] = bool(v)
+        elif k == "xp" and isinstance(v, dict):
+            prog["xp"] = {kk: float(vv) for kk, vv in v.items()}
+    settings["progress"] = prog
+    await db.users.update_one({"id": user["id"]}, {"$set": {"settings": settings}})
+    return _prefs_of({"settings": settings})
+
+
+
 # ---------------- Trade Photos (DB-backed, disk storage, token-served) ----------------
 def _public_photo(p: dict) -> dict:
     return {
         "id": p["id"], "trade_id": p["trade_id"], "file_name": p.get("file_name"),
         "mime_type": p.get("mime_type"), "file_size": p.get("file_size"),
+        "kind": p.get("kind", "image"),
         "display_order": p.get("display_order", 0),
         "file_url": f"/api/photos/{p['token']}/file",
         "created_at": p.get("created_at"),
@@ -408,26 +575,33 @@ async def upload_photos(trade_id: str, files: List[UploadFile] = File(...), user
     if not trade:
         raise HTTPException(status_code=404, detail="Trade not found")
     existing = await db.trade_photos.count_documents({"trade_id": trade_id, "user_id": user["id"]})
-    dest_dir = UPLOAD_DIR / user["id"] / trade_id
-    dest_dir.mkdir(parents=True, exist_ok=True)
     saved = []
     order = existing
     for f in files:
-        if f.content_type not in ALLOWED_IMAGE_MIME:
-            raise HTTPException(status_code=400, detail=f"Unsupported file type: {f.content_type}. Use JPG, PNG or WebP.")
+        ctype = (f.content_type or "").lower()
+        is_video = ctype in ALLOWED_VIDEO_MIME
+        if ctype not in ALLOWED_MEDIA_MIME:
+            raise HTTPException(status_code=400, detail=f"Unsupported file type: {ctype}. Use JPG, PNG, WebP, GIF or MP4/WebM video.")
         data = await f.read()
-        if len(data) > MAX_PHOTO_BYTES:
-            raise HTTPException(status_code=400, detail=f"{f.filename} exceeds 10MB limit.")
+        limit = MAX_VIDEO_BYTES if is_video else MAX_PHOTO_BYTES
+        if len(data) > limit:
+            mb = limit // (1024 * 1024)
+            raise HTTPException(status_code=400, detail=f"{f.filename} exceeds {mb}MB limit.")
         pid = "p_" + uuid.uuid4().hex[:10]
         token = uuid.uuid4().hex
-        ext = os.path.splitext(f.filename or "")[1][:10] or ".img"
-        path = dest_dir / f"{pid}{ext}"
-        with open(path, "wb") as out:
-            out.write(data)
+        ext = (os.path.splitext(f.filename or "")[1] or "").lstrip(".").lower()[:8] or ("mp4" if is_video else "img")
+        obj_path = f"{STORAGE_APP}/uploads/{user['id']}/{uuid.uuid4().hex}.{ext}"
+        try:
+            result = await asyncio.to_thread(storage_put, obj_path, data, ctype)
+        except Exception as e:
+            logger.error(f"Object storage upload failed: {e}")
+            raise HTTPException(status_code=502, detail="Upload storage failed. Please try again.")
         doc = {
             "id": pid, "token": token, "trade_id": trade_id, "user_id": user["id"],
-            "file_name": f.filename, "mime_type": f.content_type, "file_size": len(data),
-            "storage_path": str(path), "display_order": order, "created_at": now_iso(),
+            "file_name": f.filename, "mime_type": ctype, "file_size": len(data),
+            "kind": "video" if is_video else "image",
+            "storage": "object", "storage_path": result["path"],
+            "display_order": order, "created_at": now_iso(),
         }
         await db.trade_photos.insert_one(dict(doc))
         saved.append(_public_photo(doc))
@@ -440,10 +614,11 @@ async def delete_photo(photo_id: str, user: dict = Depends(get_current_user)):
     p = await db.trade_photos.find_one({"id": photo_id, "user_id": user["id"]})
     if not p:
         raise HTTPException(status_code=404, detail="Photo not found")
-    try:
-        os.remove(p["storage_path"])
-    except Exception:
-        pass
+    if p.get("storage") != "object":
+        try:
+            os.remove(p["storage_path"])
+        except Exception:
+            pass
     await db.trade_photos.delete_one({"id": photo_id, "user_id": user["id"]})
     await _sync_photo_meta(p["trade_id"], user["id"])
     return {"ok": True}
@@ -459,9 +634,18 @@ async def reorder_photos(trade_id: str, order: List[str], user: dict = Depends(g
 async def serve_photo(token: str):
     # Served by unguessable token -> other users cannot access by guessing trade/photo ids.
     p = await db.trade_photos.find_one({"token": token})
-    if not p or not os.path.exists(p["storage_path"]):
+    if not p:
         raise HTTPException(status_code=404, detail="Not found")
-    return FileResponse(p["storage_path"], media_type=p.get("mime_type", "image/jpeg"))
+    media = p.get("mime_type") or "application/octet-stream"
+    if p.get("storage") == "object":
+        try:
+            data, ctype = await asyncio.to_thread(storage_get, p["storage_path"])
+        except Exception:
+            raise HTTPException(status_code=404, detail="Not found")
+        return Response(content=data, media_type=media or ctype)
+    if not os.path.exists(p["storage_path"]):
+        raise HTTPException(status_code=404, detail="Not found")
+    return FileResponse(p["storage_path"], media_type=media if media != "application/octet-stream" else "image/jpeg")
 
 
 # ---------------- Economic Calendar (live, cached, modular) ----------------
@@ -595,6 +779,12 @@ async def startup():
     await db.trade_photos.create_index("trade_id")
     await db.trade_photos.create_index("token")
     await db.user_sessions.create_index("session_token", unique=True)
+    await db.achievements.create_index("user_id")
+    try:
+        await asyncio.to_thread(init_storage)
+        logger.info("Object storage initialized")
+    except Exception as e:
+        logger.error(f"Object storage init failed (uploads will retry lazily): {e}")
     admin_email = "admin@tradesentinel.com"
     if not await db.users.find_one({"email": admin_email}):
         await db.users.insert_one({

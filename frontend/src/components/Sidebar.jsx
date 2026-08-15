@@ -13,7 +13,7 @@ const NAV = [
   { to: '/ai-insights', label: 'AI Insights', icon: Sparkles },
   { to: '/vision-board', label: 'Vision Board', icon: ImageIcon },
   { to: '/zen-zone', label: 'Zen Zone', icon: Wind },
-  { to: '/milestones', label: 'Milestones', icon: Trophy },
+  { to: '/milestones', label: 'Progress', icon: Trophy },
   { to: '/backtest', label: 'Backtest', icon: LineChart },
 ];
 
