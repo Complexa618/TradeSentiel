@@ -55,3 +55,66 @@ code { font-family: 'JetBrains Mono', monospace; }
 }
 
 ::selection { background: rgba(52,211,153,0.3); color: #fff; }
+
+/* ---------- Premium animation system ---------- */
+:root {
+  --dur-micro: 130ms;
+  --dur-std: 200ms;
+  --dur-large: 320ms;
+  --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+/* Page transition on route change */
+@keyframes pageEnter {
+  from { opacity: 0; transform: translateY(8px) scale(0.995); filter: blur(2px); }
+  to   { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+}
+.page-enter { animation: pageEnter var(--dur-large) var(--ease) both; }
+
+/* Card polish */
+.card-surface {
+  transition: border-color var(--dur-std) var(--ease), background-color var(--dur-std) var(--ease),
+              box-shadow var(--dur-std) var(--ease), transform var(--dur-std) var(--ease);
+}
+.card-surface:hover {
+  border-color: rgba(52,211,153,0.22);
+  background: linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0.01));
+  box-shadow: 0 10px 40px -18px rgba(0,0,0,0.7);
+}
+.card-lift:hover { transform: translateY(-2px); }
+
+/* Button micro-interactions */
+button { transition: filter var(--dur-micro) var(--ease), transform var(--dur-micro) var(--ease),
+                     background-color var(--dur-micro) var(--ease), border-color var(--dur-micro) var(--ease),
+                     color var(--dur-micro) var(--ease), opacity var(--dur-micro) var(--ease); }
+button:active:not(:disabled) { transform: scale(0.975); }
+
+/* Skeleton shimmer */
+@keyframes shimmer { 0% { background-position: -400px 0; } 100% { background-position: 400px 0; } }
+.skeleton {
+  background: linear-gradient(90deg, rgba(255,255,255,0.04) 25%, rgba(255,255,255,0.09) 37%, rgba(255,255,255,0.04) 63%);
+  background-size: 800px 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+  border-radius: 8px;
+}
+
+/* Dialog backdrop blur (radix overlay) */
+[data-radix-popper-content-wrapper], .dialog-blur { backdrop-filter: blur(6px); }
+
+/* Sidebar active indicator */
+@keyframes indicatorIn { from { transform: scaleY(0); opacity: 0; } to { transform: scaleY(1); opacity: 1; } }
+.nav-indicator { animation: indicatorIn var(--dur-std) var(--ease) both; transform-origin: center; }
+
+/* List item entrance (staggered where used) */
+@keyframes rowIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+.row-in { animation: rowIn var(--dur-std) var(--ease) both; }
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}

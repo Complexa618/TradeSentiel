@@ -1,6 +1,7 @@
 import React from 'react';
 import './App.css';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { Toaster } from 'sonner';
 import { AppProvider, useApp } from './context/AppContext';
 import Layout from './components/Layout';
 import Login from './pages/Login';
@@ -28,6 +29,7 @@ function App() {
   return (
     <div className="App">
       <AppProvider>
+        <Toaster position="bottom-right" theme="dark" toastOptions={{ style: { background: '#101216', border: '1px solid rgba(255,255,255,0.1)', color: '#e7e9ee' } }} />
         <BrowserRouter>
           <Routes>
             <Route path="/login" element={<PublicOnly><Login /></PublicOnly>} />

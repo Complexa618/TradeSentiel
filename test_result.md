@@ -163,7 +163,7 @@ frontend:
 metadata:
   created_by: "main_agent"
   version: "1.0"
-  test_sequence: 2
+  test_sequence: 3
   run_ui: false
 
 test_plan:
@@ -180,3 +180,78 @@ agent_communication:
     -message: "Backend implemented with JWT + MongoDB. Please test all backend endpoints. Key checks: (1) auth signup/login/me, admin login admin@tradesentinel.com/Sentinel@2025; (2) trades CRUD + derived pnl/rMultiple (risk=0 -> rMultiple null); (3) per-user data isolation between two signups; (4) demo seeding returns 10 trades + 2 accounts; (5) all data endpoints require Bearer token (401 otherwise)."
     -agent: "testing"
     -message: "✅ BACKEND TESTING COMPLETE - ALL 32 TESTS PASSED (100% success rate). Comprehensive testing completed for all backend APIs at https://trade-sentinel-67.preview.emergentagent.com/api. AUTH (8/8 passed): signup, login, /me, admin login, duplicate email handling, wrong password, unknown email, 401 without token. TRADES (15/15 passed): CRUD operations, derived pnl/rMultiple calculations, risk=0 edge case (rMultiple=null), demo seeding (10 trades + 2 accounts), clear functionality, per-user isolation verified with 2 separate users. ACCOUNTS/GOALS/SETTINGS (9/9 passed): all CRUD operations, auth requirements, aggregate /data endpoint. NO ISSUES FOUND. Backend is production-ready."
+
+## --- Update: Edit Goals bug fix + Economic Calendar (2nd cycle) ---
+backend:
+  - task: "Goals persistence via PUT /api/goals (Edit Goals fix)"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        -working: "NA"
+        -agent: "main"
+        -comment: "User reported Edit Goals not persisting. Root cause was frontend (button unwired + silent save). Verify backend: PUT /api/goals with full goals array persists; GET /api/goals and GET /api/data return updated targets/labels; editing one goal preserves the others (no delete/duplicate/reset); values survive across requests (persistence). Body is a raw JSON array."
+        -working: true
+        -agent: "testing"
+        -comment: "✅ ALL GOALS PERSISTENCE TESTS PASSED (8/8). Comprehensive testing completed: (1) GET /api/goals retrieves 4 goals correctly; (2) PUT /api/goals with modified array (changed goal[0] target to 12345 and label to 'Monthly Net P&L Custom') succeeds; (3) GET /api/goals confirms modified goal persisted with new target and label; (4) Goal count unchanged (4 goals, no deletion/duplication); (5) Other goals unchanged (same IDs, no reset); (6) GET /api/data also shows the modified goal; (7) Second independent GET confirms persistence across requests; (8) PUT without token correctly returns 401. CRITICAL FINDING: Backend API is working correctly! The user-reported issue 'Edit Goals doesn't persist' is NOT a backend problem - the issue is in the frontend (button not wired, form not submitting, etc.)."
+  - task: "Live Economic Calendar GET /api/economic-calendar"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+        -working: "NA"
+        -agent: "main"
+        -comment: "Fetches live ForexFactory (faireconomy) weekly feed, cached 30min. Returns {events:[{id,title,currency,impact,datetime}], currencies, updatedAt}. Only minimal fields (no forecast/previous/actual). Requires auth (401 without token). Verify currencies limited to USD/EUR/GBP/JPY/AUD/CAD/CHF/NZD and impact normalized to High/Medium/Low."
+        -working: true
+        -agent: "testing"
+        -comment: "✅ ALL ECONOMIC CALENDAR TESTS PASSED (6/6). Verified: (1) GET /api/economic-calendar without token returns 401; (2) With token returns correct structure {events, currencies, updatedAt} with 72 live events; (3) currencies field equals ['USD','EUR','GBP','JPY','AUD','CAD','CHF','NZD']; (4) All 72 events have ONLY {id,title,currency,impact,datetime} - NO forbidden keys (forecast/previous/actual/result); (5) All event.currency values are in the allowed 8 majors list; (6) All event.impact values are in [High,Medium,Low]. Live ForexFactory data is being fetched, filtered, and normalized correctly."
+
+test_plan:
+  current_focus:
+    - "Goals persistence via PUT /api/goals (Edit Goals fix)"
+    - "Live Economic Calendar GET /api/economic-calendar"
+  stuck_tasks: []
+  test_all: false
+  test_priority: "high_first"
+
+agent_communication:
+    -agent: "main"
+    -message: "Please re-test focusing on: (1) GOALS PERSISTENCE end-to-end: login (admin@tradesentinel.com/Sentinel@2025), GET /api/goals, PUT /api/goals with a modified array (change one goal's target and label), then GET /api/goals AND GET /api/data to confirm the change persisted and OTHER goals are unchanged (not deleted/duplicated/reset). Confirm a fresh GET returns the new values (persistence). (2) ECONOMIC CALENDAR: GET /api/economic-calendar requires auth (401 without token); with token returns events with only {id,title,currency,impact,datetime}; currencies restricted to the 8 majors; impact in {High,Medium,Low}."
+    -agent: "testing"
+    -message: "✅ BACKEND TESTING COMPLETE - ALL 14 TESTS PASSED (100% success rate). Tested Goals Persistence (8/8 passed) and Economic Calendar (6/6 passed). CRITICAL FINDING: Backend APIs are working perfectly. The user-reported 'Edit Goals doesn't persist' issue is NOT a backend problem - the backend correctly persists goal changes across requests. The issue is in the FRONTEND (button not wired, form not submitting, or not calling the API). Economic Calendar is fetching live ForexFactory data correctly with proper filtering and normalization. NO BACKEND ISSUES FOUND."
+
+## --- Update: Forward-looking Economic Calendar (3rd cycle) ---
+backend:
+  - task: "Forward-looking economic calendar (TradingView provider)"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        -working: "NA"
+        -agent: "main"
+        -comment: "User reported calendar showed mostly PAST events (old provider = current week only). Switched primary provider to TradingView economic-calendar (keyless, from=now to=now+30d), faireconomy fallback. Verify GET /api/economic-calendar returns events where a MAJORITY have datetime >= now (future-focused), spanning multiple future days (today..~30d), only fields {id,title,currency,impact,datetime}, currencies within the 8 majors, impact in High/Medium/Low, and 401 without token."
+        -working: true
+        -agent: "testing"
+        -comment: "✅ ALL ECONOMIC CALENDAR TESTS PASSED (8/8 - 100% success). CRITICAL BUG FIXED: Calendar is now FORWARD-LOOKING! Verified: (1) GET /api/economic-calendar without token returns 401; (2) With token (admin@tradesentinel.com) returns correct structure {events, currencies, updatedAt} with 673 live events; (3) **CRITICAL: 673/673 events are FUTURE (100.0%)** - all events have datetime >= now; (4) Events span 28 days (2026-08-16 to 2026-09-13) across 26 distinct future dates - perfect 2-4 week range; (5) All 673 events have ONLY {id,title,currency,impact,datetime} - NO forbidden keys (forecast/previous/actual/result/revision); (6) All event.currency values are in the allowed 8 majors [USD,EUR,GBP,JPY,AUD,CAD,CHF,NZD]; (7) All event.impact values are in [High,Medium,Low]; (8) currencies field equals the 8 majors. TradingView provider is working perfectly and providing forward-looking data as required. The reported bug is RESOLVED."
+
+test_plan:
+  current_focus:
+    - "Forward-looking economic calendar (TradingView provider)"
+  stuck_tasks: []
+  test_all: false
+  test_priority: "high_first"
+
+agent_communication:
+    -agent: "main"
+    -message: "Re-test GET /api/economic-calendar (auth: admin@tradesentinel.com/Sentinel@2025). CRITICAL: confirm it is now FORWARD-LOOKING — most events have datetime in the FUTURE (>= today) and the set spans several upcoming days (not just today, ideally out to ~2-4 weeks). Also confirm: only keys {id,title,currency,impact,datetime} (no forecast/previous/actual), currency in [USD,EUR,GBP,JPY,AUD,CAD,CHF,NZD], impact in [High,Medium,Low], and 401 when no token."
+    -agent: "testing"
+    -message: "✅ ECONOMIC CALENDAR TESTING COMPLETE - ALL 8 TESTS PASSED (100% success). CRITICAL BUG FIXED: The calendar is now fully FORWARD-LOOKING! Test results: 673 events retrieved, ALL 673 are future events (100.0%), spanning 28 days from 2026-08-16 to 2026-09-13 across 26 distinct dates (perfect 2-4 week range). All validation checks passed: correct response structure, 401 without token, only allowed keys {id,title,currency,impact,datetime}, all currencies in 8 majors, all impact levels valid. TradingView provider is working perfectly. The user-reported bug 'calendar showed mostly PAST events' is RESOLVED."

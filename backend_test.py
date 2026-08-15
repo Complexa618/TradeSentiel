@@ -694,21 +694,206 @@ def test_accounts_goals_settings(headers: dict):
         log_test("GET /api/data - aggregate endpoint", False, f"Exception: {str(e)}")
 
 
+def test_economic_calendar():
+    """Test economic calendar endpoint - FORWARD-LOOKING requirement"""
+    print("\n" + "="*80)
+    print("TESTING ECONOMIC CALENDAR ENDPOINT (FORWARD-LOOKING)")
+    print("="*80)
+    
+    # First, login as admin to get token
+    admin_data = {
+        "email": "admin@tradesentinel.com",
+        "password": "Sentinel@2025"
+    }
+    
+    try:
+        resp = requests.post(f"{BASE_URL}/auth/login", json=admin_data, timeout=10)
+        if resp.status_code == 200:
+            token = resp.json()["token"]
+            headers = {"Authorization": f"Bearer {token}"}
+            print("✅ Admin login successful")
+        else:
+            log_test("Economic Calendar - Admin login", False, f"Status {resp.status_code}: {resp.text}")
+            return
+    except Exception as e:
+        log_test("Economic Calendar - Admin login", False, f"Exception: {str(e)}")
+        return
+    
+    # Test 1: GET /api/economic-calendar without token (should return 401)
+    try:
+        resp = requests.get(f"{BASE_URL}/economic-calendar", timeout=10)
+        if resp.status_code == 401:
+            log_test("GET /api/economic-calendar - without token returns 401", True, "Correctly rejected")
+        else:
+            log_test("GET /api/economic-calendar - without token returns 401", False, 
+                    f"Expected 401, got {resp.status_code}")
+    except Exception as e:
+        log_test("GET /api/economic-calendar - without token returns 401", False, f"Exception: {str(e)}")
+    
+    # Test 2: GET /api/economic-calendar with token
+    try:
+        resp = requests.get(f"{BASE_URL}/economic-calendar", headers=headers, timeout=15)
+        if resp.status_code != 200:
+            log_test("GET /api/economic-calendar - with token", False, 
+                    f"Status {resp.status_code}: {resp.text}")
+            return
+        
+        data = resp.json()
+        
+        # Verify response structure
+        if not all(k in data for k in ["events", "currencies", "updatedAt"]):
+            log_test("GET /api/economic-calendar - response structure", False, 
+                    f"Missing required keys. Got: {list(data.keys())}")
+            return
+        else:
+            log_test("GET /api/economic-calendar - response structure", True, 
+                    "Has events, currencies, updatedAt")
+        
+        events = data["events"]
+        currencies = data["currencies"]
+        
+        print(f"\n📊 Total events received: {len(events)}")
+        
+        # Test 3: Verify currencies field equals the 8 majors
+        expected_currencies = ['USD', 'EUR', 'GBP', 'JPY', 'AUD', 'CAD', 'CHF', 'NZD']
+        if currencies == expected_currencies:
+            log_test("currencies field equals 8 majors", True, f"currencies: {currencies}")
+        else:
+            log_test("currencies field equals 8 majors", False, 
+                    f"Expected {expected_currencies}, got {currencies}")
+        
+        # Test 4: Parse datetimes and check FORWARD-LOOKING requirement
+        from datetime import datetime as dt, timezone
+        now = dt.now(timezone.utc)
+        
+        future_events = []
+        past_events = []
+        event_dates = set()
+        
+        for event in events:
+            # Verify event has ONLY the required keys
+            event_keys = set(event.keys())
+            required_keys = {"id", "title", "currency", "impact", "datetime"}
+            forbidden_keys = {"forecast", "previous", "actual", "result", "revision"}
+            
+            if event_keys != required_keys:
+                extra_keys = event_keys - required_keys
+                missing_keys = required_keys - event_keys
+                if extra_keys or missing_keys:
+                    log_test("Event keys validation", False, 
+                            f"Event has extra keys: {extra_keys}, missing keys: {missing_keys}")
+                    break
+            
+            # Check for forbidden keys
+            if any(k in event for k in forbidden_keys):
+                found_forbidden = [k for k in forbidden_keys if k in event]
+                log_test("Event has NO forbidden keys (forecast/previous/actual/result/revision)", False, 
+                        f"Found forbidden keys: {found_forbidden}")
+                break
+            
+            # Parse datetime
+            try:
+                event_dt = dt.fromisoformat(event["datetime"].replace("Z", "+00:00"))
+                if event_dt >= now:
+                    future_events.append(event)
+                    event_dates.add(event_dt.date())
+                else:
+                    past_events.append(event)
+            except Exception as e:
+                log_test("Parse event datetime", False, f"Failed to parse datetime: {event['datetime']}, error: {e}")
+                return
+        
+        # If we got here without breaking, all events have correct keys
+        if len(events) > 0:
+            log_test("All events have ONLY {id,title,currency,impact,datetime}", True, 
+                    f"All {len(events)} events validated")
+        
+        # Test 5: Verify all event.currency in allowed list
+        invalid_currencies = [e["currency"] for e in events if e["currency"] not in expected_currencies]
+        if not invalid_currencies:
+            log_test("All event.currency in [USD,EUR,GBP,JPY,AUD,CAD,CHF,NZD]", True, 
+                    f"All {len(events)} events have valid currencies")
+        else:
+            log_test("All event.currency in [USD,EUR,GBP,JPY,AUD,CAD,CHF,NZD]", False, 
+                    f"Found invalid currencies: {set(invalid_currencies)}")
+        
+        # Test 6: Verify all event.impact in [High,Medium,Low]
+        allowed_impacts = ["High", "Medium", "Low"]
+        invalid_impacts = [e["impact"] for e in events if e["impact"] not in allowed_impacts]
+        if not invalid_impacts:
+            log_test("All event.impact in [High,Medium,Low]", True, 
+                    f"All {len(events)} events have valid impact levels")
+        else:
+            log_test("All event.impact in [High,Medium,Low]", False, 
+                    f"Found invalid impacts: {set(invalid_impacts)}")
+        
+        # Test 7: CRITICAL - FORWARD-LOOKING requirement
+        future_count = len(future_events)
+        past_count = len(past_events)
+        total_count = len(events)
+        
+        print(f"\n📅 FORWARD-LOOKING ANALYSIS:")
+        print(f"   Future events: {future_count}")
+        print(f"   Past events: {past_count}")
+        print(f"   Total events: {total_count}")
+        
+        if total_count > 0:
+            future_percentage = (future_count / total_count) * 100
+            print(f"   Future percentage: {future_percentage:.1f}%")
+            
+            # MAJORITY must be future (>50%)
+            if future_count > past_count:
+                log_test("CRITICAL: MAJORITY of events are FUTURE (datetime >= now)", True, 
+                        f"{future_count}/{total_count} events are future ({future_percentage:.1f}%)")
+            else:
+                log_test("CRITICAL: MAJORITY of events are FUTURE (datetime >= now)", False, 
+                        f"Only {future_count}/{total_count} events are future ({future_percentage:.1f}%). FAIL!")
+        else:
+            log_test("CRITICAL: MAJORITY of events are FUTURE (datetime >= now)", False, 
+                    "No events returned")
+        
+        # Test 8: Verify events span MULTIPLE upcoming days
+        if future_events:
+            future_datetimes = [dt.fromisoformat(e["datetime"].replace("Z", "+00:00")) for e in future_events]
+            min_date = min(future_datetimes).date()
+            max_date = max(future_datetimes).date()
+            date_range_days = (max_date - min_date).days
+            distinct_future_dates = len(event_dates)
+            
+            print(f"\n📆 DATE RANGE ANALYSIS:")
+            print(f"   Min event date: {min_date}")
+            print(f"   Max event date: {max_date}")
+            print(f"   Date range: {date_range_days} days")
+            print(f"   Distinct future dates: {distinct_future_dates}")
+            
+            # Events should span multiple days (ideally 2-4 weeks = 14-30 days)
+            if date_range_days >= 7 and distinct_future_dates >= 5:
+                log_test("Events span MULTIPLE upcoming days (ideally 2-4 weeks)", True, 
+                        f"Range: {date_range_days} days, {distinct_future_dates} distinct dates from {min_date} to {max_date}")
+            elif date_range_days >= 1 and distinct_future_dates >= 2:
+                log_test("Events span MULTIPLE upcoming days (ideally 2-4 weeks)", True, 
+                        f"Range: {date_range_days} days, {distinct_future_dates} distinct dates (less than ideal but acceptable)")
+            else:
+                log_test("Events span MULTIPLE upcoming days (ideally 2-4 weeks)", False, 
+                        f"Only {date_range_days} days range, {distinct_future_dates} distinct dates. Expected 2-4 weeks!")
+        else:
+            log_test("Events span MULTIPLE upcoming days (ideally 2-4 weeks)", False, 
+                    "No future events to analyze")
+        
+    except Exception as e:
+        log_test("GET /api/economic-calendar - with token", False, f"Exception: {str(e)}")
+        import traceback
+        print(f"Traceback: {traceback.format_exc()}")
+
+
 def main():
     print("\n" + "="*80)
     print("TRADE SENTINEL BACKEND API TESTS")
     print(f"Testing: {BASE_URL}")
     print("="*80)
     
-    # Run all tests
-    token = test_auth()
-    headers = test_trades(token)
-    test_user_isolation()
-    
-    if headers:
-        test_accounts_goals_settings(headers)
-    else:
-        print("\n⚠️  Skipping accounts/goals/settings tests - no auth token available")
+    # Run economic calendar tests (the current focus)
+    test_economic_calendar()
     
     # Print summary
     print("\n" + "="*80)
@@ -717,7 +902,8 @@ def main():
     print(f"Total Tests: {passed + failed}")
     print(f"✅ Passed: {passed}")
     print(f"❌ Failed: {failed}")
-    print(f"Success Rate: {(passed / (passed + failed) * 100):.1f}%")
+    if passed + failed > 0:
+        print(f"Success Rate: {(passed / (passed + failed) * 100):.1f}%")
     print("="*80)
     
     # Print all results

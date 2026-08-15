@@ -2,13 +2,13 @@ import React, { useMemo, useState } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import { fmtMoney, fmtR, fmtDuration } from '../lib/calc';
-import { Plus, Download, TrendingUp, TrendingDown, Trash2, Search, Image as ImageIcon, X } from 'lucide-react';
+import { Plus, Download, TrendingUp, TrendingDown, Trash2, Search, Image as ImageIcon, X, Pencil } from 'lucide-react';
 
 const SORTS = { date: 'Date', symbol: 'Symbol', pnl: 'P&L', r: 'R Multiple' };
 
 export default function LogTrade() {
   const { data, deleteTrade } = useApp();
-  const { openAddTrade } = useOutletContext();
+  const { openAddTrade, openEditTrade } = useOutletContext();
   const [sort, setSort] = useState('date');
   const [query, setQuery] = useState('');
   const [viewImg, setViewImg] = useState(null);
@@ -137,7 +137,10 @@ export default function LogTrade() {
                     ) : <span className="text-gray-700">—</span>}
                   </td>
                   <td className="px-4 py-3 text-right">
-                    <button onClick={() => deleteTrade(t.id)} className="text-gray-600 hover:text-red-400"><Trash2 className="h-4 w-4" /></button>
+                    <div className="inline-flex items-center gap-1">
+                      <button onClick={() => openEditTrade(t)} className="p-1.5 rounded-md text-gray-500 hover:text-emerald-400 hover:bg-white/[0.05] transition" title="Edit trade"><Pencil className="h-4 w-4" /></button>
+                      <button onClick={() => deleteTrade(t.id)} className="p-1.5 rounded-md text-gray-600 hover:text-red-400 hover:bg-white/[0.05] transition" title="Delete trade"><Trash2 className="h-4 w-4" /></button>
+                    </div>
                   </td>
                 </tr>
               ))}

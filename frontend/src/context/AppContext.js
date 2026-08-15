@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useMemo, useState, useCallback } from 'react';
 import axios from 'axios';
+import { toast } from 'sonner';
 
 const AppContext = createContext(null);
 export const useApp = () => useContext(AppContext);
@@ -74,27 +75,31 @@ export function AppProvider({ children }) {
   const addTrade = useCallback(async (trade) => {
     const res = await api.post('/trades', trade);
     setData((d) => ({ ...d, trades: [res.data, ...d.trades] }));
+    toast.success('Trade saved');
     return res.data;
   }, []);
 
   const updateTrade = useCallback(async (id, patch) => {
     const res = await api.put(`/trades/${id}`, patch);
     setData((d) => ({ ...d, trades: d.trades.map((t) => (t.id === id ? res.data : t)) }));
+    toast.success('Trade updated');
   }, []);
 
   const deleteTrade = useCallback(async (id) => {
     setData((d) => ({ ...d, trades: d.trades.filter((t) => t.id !== id) }));
-    try { await api.delete(`/trades/${id}`); } catch { /* refetch on failure */ fetchData(); }
+    try { await api.delete(`/trades/${id}`); toast.success('Trade deleted'); } catch { fetchData(); }
   }, [fetchData]);
 
   const loadDemo = useCallback(async () => {
     const res = await api.post('/trades/demo');
     setData({ ...emptyData(), ...res.data });
+    toast.success('Demo data loaded');
   }, []);
 
   const clearData = useCallback(async () => {
     await api.delete('/trades');
     setData((d) => ({ ...d, trades: [], accounts: [] }));
+    toast.success('Journal cleared');
   }, []);
 
   const addAccount = useCallback(async (acc) => {
@@ -115,17 +120,36 @@ export function AppProvider({ children }) {
     });
   }, []);
 
+  // Persist the full goals array to the backend (used by Edit Goals). Returns {ok}|{error}.
+  const saveGoals = useCallback(async (goals) => {
+    try {
+      const res = await api.put('/goals', goals);
+      const saved = Array.isArray(res.data) ? res.data : goals;
+      setData((d) => ({ ...d, goals: saved }));
+      toast.success('Goals updated');
+      return { ok: true };
+    } catch (e) {
+      toast.error('Unable to update goal. Please try again.');
+      return { error: errMsg(e) };
+    }
+  }, []);
+
   const setSettings = useCallback(async (patch) => {
     setData((d) => ({ ...d, settings: { ...d.settings, ...patch } }));
     try { await api.put('/settings', patch); } catch { /* ignore */ }
+  }, []);
+
+  const fetchEconomicCalendar = useCallback(async () => {
+    const res = await api.get('/economic-calendar');
+    return res.data;
   }, []);
 
   const value = useMemo(() => ({
     user, data, ready,
     signup, login, logout,
     addTrade, updateTrade, deleteTrade, loadDemo, clearData,
-    addAccount, deleteAccount, updateGoal, setSettings,
-  }), [user, data, ready, signup, login, logout, addTrade, updateTrade, deleteTrade, loadDemo, clearData, addAccount, deleteAccount, updateGoal, setSettings]);
+    addAccount, deleteAccount, updateGoal, saveGoals, setSettings, fetchEconomicCalendar,
+  }), [user, data, ready, signup, login, logout, addTrade, updateTrade, deleteTrade, loadDemo, clearData, addAccount, deleteAccount, updateGoal, saveGoals, setSettings, fetchEconomicCalendar]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }

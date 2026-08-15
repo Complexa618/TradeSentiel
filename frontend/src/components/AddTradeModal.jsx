@@ -1,10 +1,13 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog';
 import { useApp } from '../context/AppContext';
 import { SESSIONS, COMMON_TAGS, SYMBOLS } from '../mock';
 import { computeTradeMetrics, fmtMoney, fmtR, fmtDuration } from '../lib/calc';
 import { TrendingUp, TrendingDown, Upload, X, Check, Clock } from 'lucide-react';
 import StrategyTagInput from './StrategyTagInput';
+import DarkSelect from './DarkSelect';
+import DatePicker from './DatePicker';
+import TimeField from './TimeField';
 
 const todayStr = () => {
   const d = new Date();
@@ -17,11 +20,32 @@ const timeStr = (addMs = 0) => {
   const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
   return local.toISOString().slice(11, 16);
 };
+// ISO datetime -> local HH:mm
+const isoToTime = (iso) => {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(11, 16);
+};
 
 const makeEmpty = () => ({
   symbol: '', direction: 'long', risk: '', reward: '',
   session: 'NY AM', strategies: [], status: 'closed', tags: [], notes: '',
   screenshot: null, day: todayStr(), entryTimeVal: timeStr(), exitTimeVal: timeStr(3600000),
+});
+
+// Build form state from an existing trade (edit mode)
+const fromTrade = (t) => ({
+  symbol: t.symbol || '', direction: t.direction || 'long',
+  risk: t.risk ?? '', reward: t.reward ?? '',
+  session: SESSIONS.includes(t.session) ? t.session : 'NY AM',
+  strategies: Array.isArray(t.strategies) ? t.strategies : (t.strategy ? [t.strategy] : []),
+  status: t.status || 'closed', tags: t.tags || [], notes: t.notes || '',
+  screenshot: t.screenshot || null,
+  day: (t.day || (t.date || '').slice(0, 10)) || todayStr(),
+  entryTimeVal: isoToTime(t.entryTime) || timeStr(),
+  exitTimeVal: isoToTime(t.exitTime) || timeStr(3600000),
 });
 
 // Combine a day (YYYY-MM-DD) and a time (HH:mm) into an ISO datetime
@@ -31,10 +55,16 @@ const combine = (day, time) => {
   return isNaN(d.getTime()) ? null : d.toISOString();
 };
 
-export default function AddTradeModal({ open, onClose }) {
-  const { addTrade } = useApp();
+export default function AddTradeModal({ open, onClose, trade = null }) {
+  const { addTrade, updateTrade } = useApp();
+  const isEdit = !!trade;
   const [form, setForm] = useState(makeEmpty);
   const fileRef = useRef();
+
+  // Prefill when opening; reset when closing
+  useEffect(() => {
+    if (open) setForm(trade ? fromTrade(trade) : makeEmpty());
+  }, [open, trade]);
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -55,7 +85,7 @@ export default function AddTradeModal({ open, onClose }) {
 
   const submit = (e) => {
     e.preventDefault();
-    addTrade({
+    const payload = {
       symbol: form.symbol, direction: form.direction, status: form.status,
       tags: form.tags, notes: form.notes, screenshot: form.screenshot,
       strategies: (form.strategies || []).map((s) => s.trim()).filter(Boolean),
@@ -66,7 +96,9 @@ export default function AddTradeModal({ open, onClose }) {
       date: form.day ? new Date(`${form.day}T00:00:00`).toISOString() : new Date().toISOString(),
       entryTime: entryISO,
       exitTime: exitISO,
-    });
+    };
+    if (isEdit) updateTrade(trade.id, payload);
+    else addTrade(payload);
     setForm(makeEmpty());
     onClose();
   };
@@ -103,22 +135,20 @@ export default function AddTradeModal({ open, onClose }) {
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <div>
               <Lbl>Status</Lbl>
-              <select value={form.status} onChange={(e) => set('status', e.target.value)} className={inputCls}>
-                <option value="closed">Closed</option>
-                <option value="open">Open</option>
-              </select>
+              <DarkSelect value={form.status} onValueChange={(v) => set('status', v)} triggerClassName="w-full"
+                options={[{ value: 'closed', label: 'Closed' }, { value: 'open', label: 'Open' }]} />
             </div>
             <div>
               <Lbl>Day</Lbl>
-              <input type="date" value={form.day} onChange={(e) => set('day', e.target.value)} className={inputCls} required />
+              <DatePicker value={form.day} onChange={(v) => set('day', v)} />
             </div>
             <div>
               <Lbl>Entry Time</Lbl>
-              <input type="time" value={form.entryTimeVal} onChange={(e) => set('entryTimeVal', e.target.value)} className={inputCls} />
+              <TimeField value={form.entryTimeVal} onChange={(v) => set('entryTimeVal', v)} />
             </div>
             <div>
               <Lbl>Exit Time</Lbl>
-              <input type="time" value={form.exitTimeVal} onChange={(e) => set('exitTimeVal', e.target.value)} className={inputCls} />
+              <TimeField value={form.exitTimeVal} onChange={(v) => set('exitTimeVal', v)} />
             </div>
           </div>
 
@@ -129,9 +159,7 @@ export default function AddTradeModal({ open, onClose }) {
             </div>
             <div>
               <Lbl>Session</Lbl>
-              <select value={form.session} onChange={(e) => set('session', e.target.value)} className={inputCls}>
-                {SESSIONS.map((s) => <option key={s} value={s}>{s}</option>)}
-              </select>
+              <DarkSelect value={form.session} onValueChange={(v) => set('session', v)} options={SESSIONS} triggerClassName="w-full" />
             </div>
           </div>
 

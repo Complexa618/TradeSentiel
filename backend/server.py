@@ -12,6 +12,13 @@ import uuid
 from datetime import datetime, timezone, timedelta
 import jwt
 from passlib.context import CryptContext
+import requests
+import asyncio
+import hashlib
+import time as _time
+from fastapi import UploadFile, File
+from fastapi.responses import FileResponse
+import shutil
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -260,6 +267,102 @@ async def put_settings(body: SettingsIn, user: dict = Depends(get_current_user))
             settings[k] = v
     await db.users.update_one({"id": user["id"]}, {"$set": {"settings": settings}})
     return settings
+
+
+# ---------------- Economic Calendar (live, cached, modular) ----------------
+# Provider integration lives in backend only; no API key required for this feed,
+# so no secret is ever exposed to the frontend. Add more providers here later.
+ALLOWED_CURRENCIES = ['USD', 'EUR', 'GBP', 'JPY', 'AUD', 'CAD', 'CHF', 'NZD']
+_econ_cache = {"data": None, "ts": 0}
+_ECON_TTL = 60 * 30  # 30 minutes
+
+def _normalize_impact(v: str) -> str:
+    v = (v or "").lower()
+    if v == "high":
+        return "High"
+    if v == "medium":
+        return "Medium"
+    return "Low"  # Low + Holiday -> Low
+
+# TradingView economic calendar: keyless, supports future date ranges (forward-looking).
+_TV_COUNTRY_CUR = {"US": "USD", "EU": "EUR", "GB": "GBP", "JP": "JPY", "AU": "AUD", "CA": "CAD", "CH": "CHF", "NZ": "NZD"}
+_TV_IMPACT = {1: "High", 0: "Medium", -1: "Low"}
+
+def _fetch_tradingview():
+    from datetime import datetime as _dt, timedelta as _td
+    now = _dt.utcnow()
+    frm = now.strftime("%Y-%m-%dT00:00:00.000Z")
+    to = (now + _td(days=30)).strftime("%Y-%m-%dT00:00:00.000Z")
+    r = requests.get(
+        "https://economic-calendar.tradingview.com/events",
+        params={"from": frm, "to": to, "countries": ",".join(_TV_COUNTRY_CUR.keys())},
+        headers={"User-Agent": "Mozilla/5.0", "Origin": "https://www.tradingview.com"},
+        timeout=25,
+    )
+    r.raise_for_status()
+    result = r.json().get("result", [])
+    events = []
+    for ev in result:
+        cur = ev.get("currency") or _TV_COUNTRY_CUR.get(ev.get("country"))
+        if cur not in ALLOWED_CURRENCIES:
+            continue
+        title = ev.get("title", "")
+        dt = ev.get("date", "")  # ISO Z
+        key = f"{title}{cur}{dt}"
+        events.append({
+            "id": hashlib.md5(key.encode()).hexdigest()[:12],
+            "title": title,
+            "currency": cur,
+            "impact": _TV_IMPACT.get(ev.get("importance"), "Low"),
+            "datetime": dt,
+        })
+    events.sort(key=lambda e: e["datetime"])
+    return events
+
+def _fetch_faireconomy():
+    r = requests.get("https://nfs.faireconomy.media/ff_calendar_thisweek.json",
+                     headers={"User-Agent": "Mozilla/5.0"}, timeout=20)
+    r.raise_for_status()
+    events = []
+    for ev in r.json():
+        cur = ev.get("country")
+        if cur not in ALLOWED_CURRENCIES:
+            continue
+        title, dt = ev.get("title", ""), ev.get("date", "")
+        key = f"{title}{cur}{dt}"
+        events.append({"id": hashlib.md5(key.encode()).hexdigest()[:12], "title": title,
+                       "currency": cur, "impact": _normalize_impact(ev.get("impact")), "datetime": dt})
+    return events
+
+def _fetch_forexfactory():
+    # Primary: TradingView (forward-looking). Fallback: faireconomy (current week only).
+    try:
+        events = _fetch_tradingview()
+        if events:
+            return events
+    except Exception as e:
+        logger.warning(f"TradingView calendar failed, falling back: {e}")
+    return _fetch_faireconomy()
+
+def _get_events(force=False):
+    now = _time.time()
+    if not force and _econ_cache["data"] is not None and (now - _econ_cache["ts"] < _ECON_TTL):
+        return _econ_cache["data"]
+    try:
+        data = _fetch_forexfactory()
+        _econ_cache["data"] = data
+        _econ_cache["ts"] = now
+        return data
+    except Exception as e:
+        logger.warning(f"Economic calendar fetch failed: {e}")
+        # serve stale cache if available
+        return _econ_cache["data"] or []
+
+@api.get("/economic-calendar")
+async def economic_calendar(user: dict = Depends(get_current_user)):
+    loop = asyncio.get_event_loop()
+    events = await loop.run_in_executor(None, _get_events, False)
+    return {"events": events, "currencies": ALLOWED_CURRENCIES, "updatedAt": _econ_cache["ts"]}
 
 
 @api.get("/")

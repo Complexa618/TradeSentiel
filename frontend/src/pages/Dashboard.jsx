@@ -6,6 +6,8 @@ import { AreaChart, LineChartSimple, BarChart, Gauge } from '../components/Chart
 import { MOTIVATION } from '../mock';
 import { SESSIONS } from '../mock';
 import ManageAccountsModal from '../components/ManageAccountsModal';
+import GoalsModal from '../components/GoalsModal';
+import DarkSelect from '../components/DarkSelect';
 import {
   Plus, ExternalLink, TrendingUp, TrendingDown, Activity, Sparkles, Target,
   Database, ArrowUpRight, ArrowDownRight, Clock, Filter
@@ -22,6 +24,7 @@ export default function Dashboard() {
   const [hideBalance, setHideBalance] = useState(false);
   const [hideUsername, setHideUsername] = useState(false);
   const [manageOpen, setManageOpen] = useState(false);
+  const [goalsOpen, setGoalsOpen] = useState(false);
   const [range, setRange] = useState('30D');
   const [fStrategy, setFStrategy] = useState('All');
   const [fSession, setFSession] = useState('All');
@@ -242,7 +245,7 @@ export default function Dashboard() {
         <div className="card-surface rounded-2xl p-6">
           <div className="flex items-center justify-between">
             <h3 className="text-white font-semibold">Trading Goals</h3>
-            <button className="text-xs text-emerald-400 hover:text-emerald-300">Edit Goals</button>
+            <button onClick={() => setGoalsOpen(true)} className="text-xs text-emerald-400 hover:text-emerald-300 transition">Edit Goals</button>
           </div>
           <div className="space-y-4 mt-5">
             {data.goals.map((g) => {
@@ -310,6 +313,7 @@ export default function Dashboard() {
       </div>
 
       <ManageAccountsModal open={manageOpen} onClose={() => setManageOpen(false)} />
+      <GoalsModal open={goalsOpen} onClose={() => setGoalsOpen(false)} />
     </div>
   );
 }
@@ -324,19 +328,12 @@ function liveGoal(g, stats) {
 const fmtHold = (m) => { if (m === null || m === undefined) return '—'; if (m < 60) return `${Math.round(m)}m`; return `${(m / 60).toFixed(1)}h`; };
 
 const SectionTitle = ({ children }) => <h2 className="text-lg font-semibold text-white mt-8 mb-3">{children}</h2>;
-const FilterSelect = ({ label, value, onChange, options }) => (
-  <div className="relative">
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      className="appearance-none rounded-lg bg-white/[0.04] border border-white/[0.08] pl-3 pr-8 py-1.5 text-xs font-medium text-gray-200 focus:outline-none focus:border-emerald-500/50 transition cursor-pointer hover:bg-white/[0.06]"
-    >
-      <option value="All">All {label === 'Strategy' ? 'Strategies' : 'Sessions'}</option>
-      {options.map((o) => <option key={o} value={o}>{o}</option>)}
-    </select>
-    <ArrowDownRight className="absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-500 rotate-45 pointer-events-none" />
-  </div>
-);
+const FilterSelect = ({ label, value, onChange, options }) => {
+  const opts = [{ value: 'All', label: `All ${label === 'Strategy' ? 'Strategies' : 'Sessions'}` }, ...options.map((o) => ({ value: o, label: o }))];
+  return (
+    <DarkSelect value={value} onValueChange={onChange} options={opts} triggerClassName="py-1.5 text-xs font-medium min-w-[150px]" />
+  );
+};
 const PillBtn = ({ children, onClick, active }) => (
   <button onClick={onClick} className={`text-xs font-medium px-3 py-1.5 rounded-md transition ${active ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-white/[0.05] text-gray-300 hover:bg-white/[0.08] border border-white/[0.06]'}`}>{children}</button>
 );
