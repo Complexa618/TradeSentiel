@@ -3,6 +3,7 @@ import { Menu, Plus, ChevronDown, LogOut, User } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { useLocation } from 'react-router-dom';
 import NewsCountdown from './NewsCountdown';
+import { Avatar } from './Avatar';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator, DropdownMenuLabel
 } from './ui/dropdown-menu';
@@ -17,7 +18,6 @@ export default function TopBar({ onToggleSidebar, onAddTrade }) {
   const { user, logout } = useApp();
   const location = useLocation();
   const title = TITLES[location.pathname] || 'Dashboard';
-  const initial = (user?.name || 'T').charAt(0).toUpperCase();
 
   return (
     <header className="h-16 sticky top-0 z-30 flex items-center justify-between px-4 lg:px-6 bg-[#08090c]/80 backdrop-blur-xl border-b border-white/[0.06]">
@@ -40,9 +40,7 @@ export default function TopBar({ onToggleSidebar, onAddTrade }) {
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button className="flex items-center gap-2 rounded-lg pl-1.5 pr-2 py-1.5 hover:bg-white/[0.05] transition-colors">
-              <div className="h-8 w-8 rounded-full bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center text-[#08090c] text-sm font-bold">
-                {initial}
-              </div>
+              <Avatar name={user?.name} picture={user?.picture} size={32} />
               <div className="hidden sm:block text-left leading-tight">
                 <div className="text-sm font-medium text-white">{user?.name || 'Trader'}</div>
                 <div className="text-[11px] text-gray-500">{user?.email}</div>

@@ -4,6 +4,7 @@ import { useApp } from '../context/AppContext';
 import { computeStats, equityCurve, dailyPnl, sessionBreakdown, strategyLeaderboard, filterTrades, distinctStrategies, fmtMoney, fmtPct, fmtR, startingBalance, totalBalance as calcTotalBalance } from '../lib/calc';
 import { AreaChart, LineChartSimple, BarChart, Gauge } from '../components/Charts';
 import EquityChart from '../components/EquityChart';
+import { Avatar } from '../components/Avatar';
 import { MOTIVATION } from '../mock';
 import { SESSIONS } from '../mock';
 import ManageAccountsModal from '../components/ManageAccountsModal';
@@ -77,9 +78,7 @@ export default function Dashboard() {
           <h1 className="text-3xl font-bold text-white">Welcome back.</h1>
           <p className="text-gray-500 mt-1">{motiv}</p>
           <div className="flex items-center gap-3 mt-4">
-            <div className="h-8 w-8 rounded-full bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center text-[#08090c] text-sm font-bold">
-              {(user?.name || 'T').charAt(0).toUpperCase()}
-            </div>
+            <Avatar name={user?.name} picture={user?.picture} size={32} />
             <span className="text-sm font-medium text-white">{user?.name || 'Trader'}</span>
             <span className="text-[11px] font-semibold px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 label-caps">
               {allTimeStats.total} Trades Logged
@@ -132,9 +131,7 @@ export default function Dashboard() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-6">
           <div>
             <div className="flex items-center gap-3">
-              <div className="h-11 w-11 rounded-full bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center text-[#08090c] font-bold">
-                {(user?.name || 'T').charAt(0).toUpperCase()}
-              </div>
+              <Avatar name={user?.name} picture={user?.picture} size={44} />
               <div>
                 <div className="text-white font-semibold">{hideUsername ? 'Hidden' : user?.name || 'Trader'}</div>
                 <div className="text-xs text-gray-500">{hideUsername ? '@\u2022\u2022\u2022\u2022' : `@${user?.username}`} · {data.accounts.length} accounts synced</div>
