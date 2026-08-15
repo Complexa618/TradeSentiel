@@ -695,9 +695,9 @@ def test_accounts_goals_settings(headers: dict):
 
 
 def test_economic_calendar():
-    """Test economic calendar endpoint - FORWARD-LOOKING requirement"""
+    """Test economic calendar endpoint - BIDIRECTIONAL COVERAGE requirement"""
     print("\n" + "="*80)
-    print("TESTING ECONOMIC CALENDAR ENDPOINT (FORWARD-LOOKING)")
+    print("TESTING ECONOMIC CALENDAR ENDPOINT (BIDIRECTIONAL COVERAGE)")
     print("="*80)
     
     # First, login as admin to get token
@@ -827,58 +827,74 @@ def test_economic_calendar():
             log_test("All event.impact in [High,Medium,Low]", False, 
                     f"Found invalid impacts: {set(invalid_impacts)}")
         
-        # Test 7: CRITICAL - FORWARD-LOOKING requirement
+        # Test 7: CRITICAL - BIDIRECTIONAL COVERAGE requirement
         future_count = len(future_events)
         past_count = len(past_events)
         total_count = len(events)
         
-        print(f"\n📅 FORWARD-LOOKING ANALYSIS:")
-        print(f"   Future events: {future_count}")
-        print(f"   Past events: {past_count}")
+        print(f"\n📅 BIDIRECTIONAL COVERAGE ANALYSIS:")
+        print(f"   PAST events (datetime < now): {past_count}")
+        print(f"   FUTURE events (datetime >= now): {future_count}")
         print(f"   Total events: {total_count}")
         
-        if total_count > 0:
-            future_percentage = (future_count / total_count) * 100
-            print(f"   Future percentage: {future_percentage:.1f}%")
-            
-            # MAJORITY must be future (>50%)
-            if future_count > past_count:
-                log_test("CRITICAL: MAJORITY of events are FUTURE (datetime >= now)", True, 
-                        f"{future_count}/{total_count} events are future ({future_percentage:.1f}%)")
-            else:
-                log_test("CRITICAL: MAJORITY of events are FUTURE (datetime >= now)", False, 
-                        f"Only {future_count}/{total_count} events are future ({future_percentage:.1f}%). FAIL!")
+        # CRITICAL: BOTH past and future must be > 0
+        if past_count > 0:
+            log_test("CRITICAL: PAST events (datetime < now) count > 0", True, 
+                    f"{past_count} past events found")
         else:
-            log_test("CRITICAL: MAJORITY of events are FUTURE (datetime >= now)", False, 
-                    "No events returned")
+            log_test("CRITICAL: PAST events (datetime < now) count > 0", False, 
+                    f"ZERO past events - FAIL! Expected > 0")
         
-        # Test 8: Verify events span MULTIPLE upcoming days
-        if future_events:
-            future_datetimes = [dt.fromisoformat(e["datetime"].replace("Z", "+00:00")) for e in future_events]
-            min_date = min(future_datetimes).date()
-            max_date = max(future_datetimes).date()
-            date_range_days = (max_date - min_date).days
-            distinct_future_dates = len(event_dates)
-            
-            print(f"\n📆 DATE RANGE ANALYSIS:")
-            print(f"   Min event date: {min_date}")
-            print(f"   Max event date: {max_date}")
-            print(f"   Date range: {date_range_days} days")
-            print(f"   Distinct future dates: {distinct_future_dates}")
-            
-            # Events should span multiple days (ideally 2-4 weeks = 14-30 days)
-            if date_range_days >= 7 and distinct_future_dates >= 5:
-                log_test("Events span MULTIPLE upcoming days (ideally 2-4 weeks)", True, 
-                        f"Range: {date_range_days} days, {distinct_future_dates} distinct dates from {min_date} to {max_date}")
-            elif date_range_days >= 1 and distinct_future_dates >= 2:
-                log_test("Events span MULTIPLE upcoming days (ideally 2-4 weeks)", True, 
-                        f"Range: {date_range_days} days, {distinct_future_dates} distinct dates (less than ideal but acceptable)")
-            else:
-                log_test("Events span MULTIPLE upcoming days (ideally 2-4 weeks)", False, 
-                        f"Only {date_range_days} days range, {distinct_future_dates} distinct dates. Expected 2-4 weeks!")
+        if future_count > 0:
+            log_test("CRITICAL: FUTURE events (datetime >= now) count > 0", True, 
+                    f"{future_count} future events found")
         else:
-            log_test("Events span MULTIPLE upcoming days (ideally 2-4 weeks)", False, 
-                    "No future events to analyze")
+            log_test("CRITICAL: FUTURE events (datetime >= now) count > 0", False, 
+                    f"ZERO future events - FAIL! Expected > 0")
+        
+        # Test 8: Verify overall date range (past + today + future)
+        if events:
+            all_datetimes = []
+            for e in events:
+                try:
+                    event_dt = dt.fromisoformat(e["datetime"].replace("Z", "+00:00"))
+                    all_datetimes.append(event_dt)
+                except Exception:
+                    pass
+            
+            if all_datetimes:
+                min_datetime = min(all_datetimes)
+                max_datetime = max(all_datetimes)
+                date_range_days = (max_datetime - min_datetime).days
+                
+                # Calculate days from now
+                days_back = (now - min_datetime).days
+                days_forward = (max_datetime - now).days
+                
+                print(f"\n📆 OVERALL DATE RANGE ANALYSIS:")
+                print(f"   Min datetime: {min_datetime.isoformat()}")
+                print(f"   Max datetime: {max_datetime.isoformat()}")
+                print(f"   Total range: {date_range_days} days")
+                print(f"   Days back from now: {days_back}")
+                print(f"   Days forward from now: {days_forward}")
+                print(f"   Expected: roughly -30d to +45d (~75 days total)")
+                
+                # Verify range is roughly -30d to +45d (allow some tolerance)
+                if days_back >= 20 and days_forward >= 35:
+                    log_test("Date range spans ~30d past to ~45d future", True, 
+                            f"Range: -{days_back}d to +{days_forward}d ({date_range_days} days total)")
+                elif days_back >= 10 and days_forward >= 20:
+                    log_test("Date range spans ~30d past to ~45d future", True, 
+                            f"Range: -{days_back}d to +{days_forward}d (acceptable but less than ideal)")
+                else:
+                    log_test("Date range spans ~30d past to ~45d future", False, 
+                            f"Range: -{days_back}d to +{days_forward}d. Expected roughly -30d to +45d!")
+            else:
+                log_test("Date range spans ~30d past to ~45d future", False, 
+                        "Could not parse event datetimes")
+        else:
+            log_test("Date range spans ~30d past to ~45d future", False, 
+                    "No events to analyze")
         
     except Exception as e:
         log_test("GET /api/economic-calendar - with token", False, f"Exception: {str(e)}")

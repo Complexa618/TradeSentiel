@@ -291,8 +291,9 @@ _TV_IMPACT = {1: "High", 0: "Medium", -1: "Low"}
 def _fetch_tradingview():
     from datetime import datetime as _dt, timedelta as _td
     now = _dt.utcnow()
-    frm = now.strftime("%Y-%m-%dT00:00:00.000Z")
-    to = (now + _td(days=30)).strftime("%Y-%m-%dT00:00:00.000Z")
+    # PAST <- TODAY -> FUTURE: 30 days back, 45 days forward
+    frm = (now - _td(days=30)).strftime("%Y-%m-%dT00:00:00.000Z")
+    to = (now + _td(days=45)).strftime("%Y-%m-%dT00:00:00.000Z")
     r = requests.get(
         "https://economic-calendar.tradingview.com/events",
         params={"from": frm, "to": to, "countries": ",".join(_TV_COUNTRY_CUR.keys())},
