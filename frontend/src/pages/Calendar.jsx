@@ -17,6 +17,7 @@ export default function Calendar() {
   const { data, fetchEconomicCalendar } = useApp();
   const [cursor, setCursor] = useState(new Date());
   const [events, setEvents] = useState([]);
+  const [horizon, setHorizon] = useState(null);
   const [loadingNews, setLoadingNews] = useState(true);
   const [selectedDay, setSelectedDay] = useState(ymd(new Date()));
   const [detail, setDetail] = useState(null);
@@ -29,6 +30,7 @@ export default function Calendar() {
     try {
       const res = await fetchEconomicCalendar();
       setEvents(res.events || []);
+      setHorizon(res.horizon || null);
     } catch { /* keep old */ } finally { setLoadingNews(false); }
   }, [fetchEconomicCalendar]);
 
@@ -144,6 +146,9 @@ export default function Calendar() {
           <RefreshCw className={`h-3.5 w-3.5 ${loadingNews ? 'animate-spin' : ''}`} /> {loadingNews ? 'Syncing…' : 'Live'}
         </button>
       </div>
+      {horizon && (
+        <p className="text-[11px] text-gray-600 mt-2 px-1">Live economic events scheduled through <span className="text-gray-400">{new Date(horizon).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</span>. Calendars publish ~4 weeks ahead.</p>
+      )}
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 mt-4">
         {/* Month grid */}
@@ -227,8 +232,17 @@ export default function Calendar() {
             {!agenda.length && (
               <div className="text-center py-12">
                 <Newspaper className="h-7 w-7 text-gray-700 mx-auto mb-3" />
-                <p className="text-sm text-gray-600">Nothing scheduled for this day.</p>
-                <p className="text-xs text-gray-700 mt-1">Trades and news will appear here.</p>
+                {horizon && selDate > new Date(horizon) ? (
+                  <>
+                    <p className="text-sm text-gray-500">No events scheduled yet.</p>
+                    <p className="text-xs text-gray-600 mt-1 max-w-[220px] mx-auto">Economic calendars publish ~4 weeks ahead. Events are scheduled through {new Date(horizon).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} — check back later for dates further out.</p>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-sm text-gray-600">Nothing scheduled for this day.</p>
+                    <p className="text-xs text-gray-700 mt-1">Trades and news will appear here.</p>
+                  </>
+                )}
               </div>
             )}
           </div>

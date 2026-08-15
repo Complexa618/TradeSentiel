@@ -38,13 +38,14 @@ export default function Sidebar({ open, onNavigate }) {
               key={to}
               to={to}
               onClick={onNavigate}
-              className={`group flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+              className={`group relative flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
                 active
                   ? 'bg-emerald-500/10 text-emerald-400'
                   : 'text-gray-400 hover:text-gray-100 hover:bg-white/[0.04]'
               }`}
             >
-              <Icon className={`h-[18px] w-[18px] ${active ? 'text-emerald-400' : 'text-gray-500 group-hover:text-gray-300'}`} />
+              {active && <span className="nav-indicator absolute left-0 top-1/2 -translate-y-1/2 h-5 w-[3px] rounded-full bg-emerald-400" />}
+              <Icon className={`h-[18px] w-[18px] transition-transform group-hover:scale-110 ${active ? 'text-emerald-400' : 'text-gray-500 group-hover:text-gray-300'}`} />
               {label}
             </NavLink>
           );

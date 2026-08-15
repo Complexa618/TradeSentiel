@@ -3,15 +3,23 @@ import { useOutletContext } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import { fmtMoney, fmtR, fmtDuration } from '../lib/calc';
 import { Plus, Download, TrendingUp, TrendingDown, Trash2, Search, Image as ImageIcon, X, Pencil } from 'lucide-react';
+import { Lightbox } from '../components/TradePhotos';
 
 const SORTS = { date: 'Date', symbol: 'Symbol', pnl: 'P&L', r: 'R Multiple' };
 
 export default function LogTrade() {
-  const { data, deleteTrade } = useApp();
+  const { data, deleteTrade, listPhotos } = useApp();
   const { openAddTrade, openEditTrade } = useOutletContext();
   const [sort, setSort] = useState('date');
   const [query, setQuery] = useState('');
   const [viewImg, setViewImg] = useState(null);
+  const [gallery, setGallery] = useState({ items: [], index: null });
+  const openViewer = async (t) => {
+    try {
+      const photos = await listPhotos(t.id);
+      if (photos.length) setGallery({ items: photos, index: 0 });
+    } catch { /* ignore */ }
+  };
 
   const trades = useMemo(() => {
     let list = data.trades.filter((t) => {
@@ -132,7 +140,9 @@ export default function LogTrade() {
                   <td className={`px-4 py-3 text-right font-mono-num ${t.rMultiple === null || t.rMultiple === undefined ? 'text-gray-500' : Number(t.rMultiple) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{fmtR(t.rMultiple)}</td>
                   <td className={`px-4 py-3 text-right font-mono-num font-semibold ${Number(t.pnl) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{fmtMoney(t.pnl)}</td>
                   <td className="px-4 py-3 text-center">
-                    {t.screenshot ? (
+                    {t.photoCount > 0 ? (
+                      <button onClick={() => openViewer(t)} className="inline-flex items-center gap-1 text-emerald-400 hover:text-emerald-300 transition"><ImageIcon className="h-4 w-4" /><span className="text-xs font-mono-num">{t.photoCount}</span></button>
+                    ) : t.screenshot ? (
                       <button onClick={() => setViewImg(t.screenshot)} className="text-emerald-400 hover:text-emerald-300"><ImageIcon className="h-4 w-4 mx-auto" /></button>
                     ) : <span className="text-gray-700">—</span>}
                   </td>
@@ -151,11 +161,12 @@ export default function LogTrade() {
       </div>
 
       {viewImg && (
-        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-6" onClick={() => setViewImg(null)}>
+        <div className="fixed inset-0 z-[100] bg-black/85 backdrop-blur-md flex items-center justify-center p-6 animate-in fade-in-0" onClick={() => setViewImg(null)}>
           <button className="absolute top-6 right-6 h-10 w-10 rounded-full bg-white/10 flex items-center justify-center text-white hover:bg-white/20"><X className="h-5 w-5" /></button>
           <img src={viewImg} alt="chart" className="max-h-[85vh] max-w-full rounded-xl border border-white/10" />
         </div>
       )}
+      <Lightbox items={gallery.items} index={gallery.index} onClose={() => setGallery({ items: [], index: null })} onIndex={(i) => setGallery((g) => ({ ...g, index: i }))} />
     </div>
   );
 }

@@ -144,12 +144,23 @@ export function AppProvider({ children }) {
     return res.data;
   }, []);
 
+  const uploadPhotos = useCallback(async (tradeId, files) => {
+    const fd = new FormData();
+    files.forEach((f) => fd.append('files', f));
+    const res = await api.post(`/trades/${tradeId}/photos`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+    return res.data;
+  }, []);
+  const listPhotos = useCallback(async (tradeId) => (await api.get(`/trades/${tradeId}/photos`)).data, []);
+  const deletePhoto = useCallback(async (id) => (await api.delete(`/photos/${id}`)).data, []);
+  const reorderPhotos = useCallback(async (tradeId, ids) => (await api.put(`/trades/${tradeId}/photos/order`, ids)).data, []);
+
   const value = useMemo(() => ({
     user, data, ready,
     signup, login, logout,
     addTrade, updateTrade, deleteTrade, loadDemo, clearData,
     addAccount, deleteAccount, updateGoal, saveGoals, setSettings, fetchEconomicCalendar,
-  }), [user, data, ready, signup, login, logout, addTrade, updateTrade, deleteTrade, loadDemo, clearData, addAccount, deleteAccount, updateGoal, saveGoals, setSettings, fetchEconomicCalendar]);
+    uploadPhotos, listPhotos, deletePhoto, reorderPhotos,
+  }), [user, data, ready, signup, login, logout, addTrade, updateTrade, deleteTrade, loadDemo, clearData, addAccount, deleteAccount, updateGoal, saveGoals, setSettings, fetchEconomicCalendar, uploadPhotos, listPhotos, deletePhoto, reorderPhotos]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }

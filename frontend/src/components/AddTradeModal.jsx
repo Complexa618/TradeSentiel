@@ -8,6 +8,7 @@ import StrategyTagInput from './StrategyTagInput';
 import DarkSelect from './DarkSelect';
 import DatePicker from './DatePicker';
 import TimeField from './TimeField';
+import TradePhotos from './TradePhotos';
 
 const todayStr = () => {
   const d = new Date();
@@ -56,14 +57,15 @@ const combine = (day, time) => {
 };
 
 export default function AddTradeModal({ open, onClose, trade = null }) {
-  const { addTrade, updateTrade } = useApp();
+  const { addTrade, updateTrade, uploadPhotos } = useApp();
   const isEdit = !!trade;
   const [form, setForm] = useState(makeEmpty);
+  const [pending, setPending] = useState([]);
   const fileRef = useRef();
 
   // Prefill when opening; reset when closing
   useEffect(() => {
-    if (open) setForm(trade ? fromTrade(trade) : makeEmpty());
+    if (open) { setForm(trade ? fromTrade(trade) : makeEmpty()); setPending([]); }
   }, [open, trade]);
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
@@ -83,11 +85,11 @@ export default function AddTradeModal({ open, onClose, trade = null }) {
     reader.readAsDataURL(file);
   };
 
-  const submit = (e) => {
+  const submit = async (e) => {
     e.preventDefault();
     const payload = {
       symbol: form.symbol, direction: form.direction, status: form.status,
-      tags: form.tags, notes: form.notes, screenshot: form.screenshot,
+      tags: form.tags, notes: form.notes,
       strategies: (form.strategies || []).map((s) => s.trim()).filter(Boolean),
       session: form.session,
       risk: Number(form.risk),
@@ -97,9 +99,16 @@ export default function AddTradeModal({ open, onClose, trade = null }) {
       entryTime: entryISO,
       exitTime: exitISO,
     };
-    if (isEdit) updateTrade(trade.id, payload);
-    else addTrade(payload);
+    if (isEdit) {
+      await updateTrade(trade.id, payload);
+    } else {
+      const created = await addTrade(payload);
+      if (created && pending.length) {
+        try { await uploadPhotos(created.id, pending.map((p) => p.file)); } catch { /* toast handled */ }
+      }
+    }
     setForm(makeEmpty());
+    setPending([]);
     onClose();
   };
 
@@ -176,21 +185,8 @@ export default function AddTradeModal({ open, onClose, trade = null }) {
           </div>
 
           <div>
-            <Lbl>Chart Screenshot</Lbl>
-            {form.screenshot ? (
-              <div className="relative rounded-lg overflow-hidden border border-white/10">
-                <img src={form.screenshot} alt="chart" className="w-full max-h-52 object-cover" />
-                <button type="button" onClick={() => set('screenshot', null)} className="absolute top-2 right-2 h-7 w-7 rounded-full bg-black/70 flex items-center justify-center hover:bg-black">
-                  <X className="h-4 w-4 text-white" />
-                </button>
-              </div>
-            ) : (
-              <button type="button" onClick={() => fileRef.current?.click()}
-                className="w-full flex flex-col items-center gap-2 py-6 rounded-lg border border-dashed border-white/15 text-gray-500 hover:border-emerald-500/40 hover:text-emerald-400 transition">
-                <Upload className="h-5 w-5" /> <span className="text-sm">Upload chart screenshot</span>
-              </button>
-            )}
-            <input ref={fileRef} type="file" accept="image/*" hidden onChange={onFile} />
+            <Lbl>Chart Screenshots</Lbl>
+            <TradePhotos tradeId={isEdit ? trade.id : null} pending={pending} onPending={setPending} />
           </div>
 
           <div>

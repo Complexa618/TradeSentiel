@@ -2,6 +2,7 @@ import React from 'react';
 import { Menu, Plus, ChevronDown, LogOut, User } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { useLocation } from 'react-router-dom';
+import NewsCountdown from './NewsCountdown';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator, DropdownMenuLabel
 } from './ui/dropdown-menu';
@@ -28,6 +29,7 @@ export default function TopBar({ onToggleSidebar, onAddTrade }) {
       </div>
 
       <div className="flex items-center gap-3">
+        <NewsCountdown />
         <button
           onClick={onAddTrade}
           className="inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-b from-emerald-400 to-emerald-500 hover:from-emerald-300 hover:to-emerald-500 text-[#062017] text-sm font-semibold px-3.5 py-2 transition-all shadow-[0_4px_20px_-6px_rgba(16,185,129,0.7)] active:scale-[0.98]"

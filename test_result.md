@@ -245,7 +245,7 @@ backend:
 
 test_plan:
   current_focus:
-    - "Economic calendar bidirectional range (past + today + future)"
+    - "Economic calendar horizon field"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
@@ -278,3 +278,57 @@ agent_communication:
     -message: "Re-test GET /api/economic-calendar (admin@tradesentinel.com/Sentinel@2025). Confirm bidirectional coverage: there are events with datetime BEFORE now (past) AND events with datetime AFTER now (future). Report counts of past vs future and the min/max datetime (expect roughly -30d to +45d). Still only {id,title,currency,impact,datetime}; currency in 8 majors; impact in High/Medium/Low; 401 without token."
     -agent: "testing"
     -message: "✅ ECONOMIC CALENDAR BIDIRECTIONAL COVERAGE TESTING COMPLETE - ALL 9 TESTS PASSED (100% success). CRITICAL REQUIREMENT MET: The calendar now has BIDIRECTIONAL coverage with 716 past events and 690 future events (both > 0). Date range spans -30d to +30d (60 days total, 2026-07-16 to 2026-09-14). All validation checks passed: correct response structure, 401 without token, only allowed keys {id,title,currency,impact,datetime}, all currencies in 8 majors, all impact levels valid. NO ISSUES FOUND. Backend is working correctly."
+
+## --- Update: Calendar horizon (news after ~Sep) explanation (5th cycle) ---
+backend:
+  - task: "Economic calendar horizon field"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        -working: "NA"
+        -agent: "main"
+        -comment: "User asked why no news after ~11 Sep 2026. Confirmed provider (TradingView) only publishes ~4 weeks ahead (returns same max date regardless of requested 'to'). NOT a code bug. Added 'horizon' (max event datetime) and 'earliest' (min) to GET /api/economic-calendar so the UI can show 'scheduled through <date>'. Verify: response includes 'horizon' and 'earliest' ISO strings; NO event.datetime exceeds horizon; events still bidirectional (past+future); minimal fields; 8 majors; impact High/Med/Low; 401 without token."
+        -working: true
+        -agent: "testing"
+        -comment: "✅ ALL HORIZON FIELD TESTS PASSED (15/15 - 100% success). CRITICAL REQUIREMENT MET: Verified GET /api/economic-calendar now includes 'horizon' and 'earliest' fields. Test results: (1) GET without token returns 401; (2) With token (admin@tradesentinel.com) returns correct structure {events, currencies, updatedAt, horizon, earliest} with 1343 live events; (3) horizon='2026-09-14T22:45:00.000Z' is non-null ISO datetime string equal to LATEST event.datetime; (4) earliest='2026-07-16T01:00:00.000Z' is non-null ISO datetime string equal to EARLIEST event.datetime; (5) NO event has datetime > horizon (all 1343 events within horizon); (6) NO event has datetime < earliest (all 1343 events after earliest); (7) Bidirectional coverage confirmed: 653 PAST events (datetime < now) and 690 FUTURE events (datetime >= now); (8) All 1343 events have ONLY {id,title,currency,impact,datetime} - NO forbidden keys; (9) All event.currency values in [USD,EUR,GBP,JPY,AUD,CAD,CHF,NZD]; (10) All event.impact values in [High,Medium,Low]; (11) currencies field equals the 8 majors. Date range: -30d to +30d (60 days total). The horizon field correctly exposes the provider's max scheduling horizon (2026-09-14) so the UI can explain the absence of events beyond it. NO ISSUES FOUND."
+
+agent_communication:
+    -agent: "main"
+    -message: "Re-test GET /api/economic-calendar (admin@tradesentinel.com/Sentinel@2025). Confirm the response now includes 'horizon' (string ISO = latest event datetime) and 'earliest'. Verify NO event has datetime later than 'horizon'. Confirm still bidirectional (some past, some future events), only {id,title,currency,impact,datetime} per event, currency in 8 majors, impact in High/Medium/Low, and 401 without token. This explains why there are no events after the provider's ~4-week horizon (expected, not a bug)."
+
+    -agent: "testing"
+    -message: "✅ ECONOMIC CALENDAR HORIZON FIELD TESTING COMPLETE - ALL 15 TESTS PASSED (100% success). CRITICAL REQUIREMENT MET: The API now correctly includes 'horizon' and 'earliest' fields. Test results summary: Total events: 1343; horizon: 2026-09-14T22:45:00.000Z (LATEST event datetime); earliest: 2026-07-16T01:00:00.000Z (EARLIEST event datetime); NO events exceed horizon or precede earliest; Bidirectional coverage: 653 past events + 690 future events; Date range: -30d to +30d (60 days); All validation checks passed (correct response structure, 401 without token, only allowed keys, all currencies in 8 majors, all impact levels valid). The horizon field successfully exposes the provider's max scheduling horizon so the UI can explain the absence of events beyond 2026-09-14. NO ISSUES FOUND. Backend is working correctly."
+
+## --- Update: Multi-photo trade gallery backend (6th cycle) ---
+backend:
+  - task: "Trade photos: upload/list/delete/serve (DB-backed, per-user)"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        -working: "NA"
+        -agent: "main"
+        -comment: "New trade_photos system. POST /api/trades/{id}/photos (multipart 'files', multiple) validates image mime (jpg/png/webp) + 10MB, stores on disk, returns [{id,trade_id,file_url,file_name,mime_type,file_size,display_order}]. GET /api/trades/{id}/photos lists (ordered). DELETE /api/photos/{id} removes record+file. GET /api/photos/{token}/file serves bytes WITHOUT auth (unguessable token). Trade gets photoCount+coverUrl denormalized. Deleting a trade cascades photo deletion. Verify: create trade, upload 2 images, list=2, trade.photoCount=2 via GET /api/trades, file_url loads image bytes, non-image rejected 400, delete works, per-user isolation (user B cannot list/delete user A's photos -> 404), auth required on upload/list/delete (401 without token)."
+        -working: true
+        -agent: "testing"
+        -comment: "✅ ALL TRADE PHOTOS TESTS PASSED (16/16 - 100% success). Comprehensive testing completed: (1) Admin login successful (admin@tradesentinel.com); (2) Created trade (XAUUSD long, risk=100, reward=250); (3) Uploaded 2 PNG images via POST /api/trades/{id}/photos - returned 2 photo objects with all required keys {id,trade_id,file_url,file_name,mime_type,file_size,display_order}; (4) GET /api/trades/{id}/photos returned 2 photos correctly ordered by display_order (0, 1); (5) GET /api/trades confirmed trade has photoCount=2 and coverUrl set; (6) Fetched photo file via file_url WITHOUT auth header - returned 200 with image/png content-type and 67 bytes (token-based access working); (7) Upload non-image file (text/plain) correctly rejected with 400 error; (8) DELETE /api/photos/{id} successfully deleted one photo; (9) List photos after delete returned 1 photo; (10) Trade photoCount correctly updated to 1; (11) AUTH TESTS: POST/GET/DELETE photos without token all correctly returned 401; (12) PER-USER ISOLATION: Created User B, verified User B cannot list User A's photos (empty list) and cannot delete User A's photo (404). All validation checks passed. NO ISSUES FOUND."
+
+agent_communication:
+    -agent: "main"
+    -message: "Test the new trade photo system. Use admin login. (1) Create a trade, POST 2 small valid PNG images to /api/trades/{id}/photos (multipart field name 'files'), expect 2 photo objects with file_url. (2) GET /api/trades/{id}/photos returns 2 ordered. (3) GET /api/trades shows that trade with photoCount=2 and coverUrl set. (4) GET the returned file_url (prefix with base URL) returns image bytes (200, image/* content-type) WITHOUT auth header (token-based). (5) Upload a non-image (e.g., text/plain) -> 400. (6) DELETE /api/photos/{id} -> ok, list drops to 1, photoCount updates. (7) Per-user isolation: signup a 2nd user, that user listing/deleting the first user's trade photos returns 404/empty. (8) upload/list/delete require Bearer token (401 without). Report results."
+    -agent: "testing"
+    -message: "✅ TRADE PHOTOS BACKEND TESTING COMPLETE - ALL 16 TESTS PASSED (100% success rate). Comprehensive testing completed for the new trade photos system at https://trade-sentinel-67.preview.emergentagent.com/api. Test results: (1) Admin login working; (2) Trade creation working; (3) Multi-photo upload working - uploaded 2 PNG images, received correct response structure with all required keys; (4) Photo listing working - returned 2 photos ordered by display_order; (5) Trade metadata working - photoCount=2 and coverUrl correctly set; (6) Token-based file serving working - fetched photo WITHOUT auth header, received image/png with correct bytes; (7) File validation working - non-image file correctly rejected with 400; (8) Photo deletion working - deleted one photo successfully; (9) Photo count updates working - list returned 1 photo after delete; (10) Trade metadata updates working - photoCount correctly updated to 1; (11) Auth protection working - all endpoints (POST/GET/DELETE) correctly return 401 without token; (12) Per-user isolation working - User B cannot access User A's photos (empty list for GET, 404 for DELETE). NO ISSUES FOUND. Backend is production-ready."
+
+test_plan:
+  current_focus:
+    - "Trade photos: upload/list/delete/serve (DB-backed, per-user)"
+  stuck_tasks: []
+  test_all: false
+  test_priority: "high_first"

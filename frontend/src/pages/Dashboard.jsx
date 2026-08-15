@@ -8,6 +8,7 @@ import { SESSIONS } from '../mock';
 import ManageAccountsModal from '../components/ManageAccountsModal';
 import GoalsModal from '../components/GoalsModal';
 import DarkSelect from '../components/DarkSelect';
+import AnimatedNumber from '../components/AnimatedNumber';
 import {
   Plus, ExternalLink, TrendingUp, TrendingDown, Activity, Sparkles, Target,
   Database, ArrowUpRight, ArrowDownRight, Clock, Filter
@@ -174,13 +175,13 @@ export default function Dashboard() {
       {/* Performance Overview */}
       <SectionTitle>Performance Overview</SectionTitle>
       <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3">
-        <Stat label="Win Rate" value={fmtPct(stats.winRate)} sub={`${stats.wins}W · ${stats.losses}L`} tone="green" />
-        <Stat label="Tag Coverage" value={fmtPct(stats.tagCoverage)} sub="Tag trades to track" tone="green" />
-        <Stat label="Net P/L" value={fmtMoney(stats.netPL)} sub="All-time" tone={stats.netPL >= 0 ? 'green' : 'red'} />
-        <Stat label="Max Win" value={fmtMoney(stats.maxWin)} sub="Biggest gain" tone="green" />
-        <Stat label="Max Loss" value={fmtMoney(stats.maxLoss)} sub="Biggest drawdown" tone="red" />
-        <Stat label="Avg R:R" value={`${stats.avgRR.toFixed(2)}R`} sub="Closed trades" tone="green" />
-        <Stat label="Executed" value={stats.executed} sub="Total trades" tone="white" />
+        <Stat label="Win Rate" num={stats.winRate} format={(n) => fmtPct(n)} sub={`${stats.wins}W · ${stats.losses}L`} tone="green" />
+        <Stat label="Tag Coverage" num={stats.tagCoverage} format={(n) => fmtPct(n)} sub="Tag trades to track" tone="green" />
+        <Stat label="Net P/L" num={stats.netPL} format={(n) => fmtMoney(n)} sub="All-time" tone={stats.netPL >= 0 ? 'green' : 'red'} />
+        <Stat label="Max Win" num={stats.maxWin} format={(n) => fmtMoney(n)} sub="Biggest gain" tone="green" />
+        <Stat label="Max Loss" num={stats.maxLoss} format={(n) => fmtMoney(n)} sub="Biggest drawdown" tone="red" />
+        <Stat label="Avg R:R" num={stats.avgRR} format={(n) => `${n.toFixed(2)}R`} sub="Closed trades" tone="green" />
+        <Stat label="Executed" num={stats.executed} format={(n) => `${Math.round(n)}`} sub="Total trades" tone="white" />
       </div>
 
       {/* Institutional Analytics */}
@@ -338,10 +339,12 @@ const PillBtn = ({ children, onClick, active }) => (
   <button onClick={onClick} className={`text-xs font-medium px-3 py-1.5 rounded-md transition ${active ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-white/[0.05] text-gray-300 hover:bg-white/[0.08] border border-white/[0.06]'}`}>{children}</button>
 );
 const toneColor = { green: 'text-emerald-400', red: 'text-red-400', white: 'text-white' };
-const Stat = ({ label, value, sub, tone }) => (
-  <div className="card-surface rounded-xl p-4">
+const Stat = ({ label, value, num, format, sub, tone }) => (
+  <div className="card-surface card-lift rounded-xl p-4">
     <div className="label-caps text-gray-500">{label}</div>
-    <div className={`text-xl font-bold font-mono-num mt-2 ${toneColor[tone]}`}>{value}</div>
+    <div className={`text-xl font-bold font-mono-num mt-2 ${toneColor[tone]}`}>
+      {num != null && format ? <AnimatedNumber value={num} format={format} /> : value}
+    </div>
     <div className="text-xs text-gray-600 mt-1">{sub}</div>
   </div>
 );

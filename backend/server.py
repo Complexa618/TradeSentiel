@@ -34,6 +34,11 @@ JWT_DAYS = 30
 pwd = CryptContext(schemes=['bcrypt'], deprecated='auto')
 security = HTTPBearer(auto_error=False)
 
+UPLOAD_DIR = ROOT_DIR / 'uploads'
+UPLOAD_DIR.mkdir(exist_ok=True)
+ALLOWED_IMAGE_MIME = {'image/jpeg', 'image/jpg', 'image/png', 'image/webp'}
+MAX_PHOTO_BYTES = 10 * 1024 * 1024  # 10 MB
+
 app = FastAPI()
 api = APIRouter(prefix="/api")
 
@@ -197,10 +202,18 @@ async def update_trade(trade_id: str, patch: dict, user: dict = Depends(get_curr
 @api.delete("/trades/{trade_id}")
 async def delete_trade(trade_id: str, user: dict = Depends(get_current_user)):
     await db.trades.delete_one({"id": trade_id, "user_id": user["id"]})
+    await _delete_trade_photos(trade_id, user["id"])
     return {"ok": True}
 
 @api.delete("/trades")
 async def clear_trades(user: dict = Depends(get_current_user)):
+    photos = await db.trade_photos.find({"user_id": user["id"]}).to_list(5000)
+    for p in photos:
+        try:
+            os.remove(p["storage_path"])
+        except Exception:
+            pass
+    await db.trade_photos.delete_many({"user_id": user["id"]})
     await db.trades.delete_many({"user_id": user["id"]})
     await db.accounts.delete_many({"user_id": user["id"]})
     return {"ok": True}
@@ -267,6 +280,99 @@ async def put_settings(body: SettingsIn, user: dict = Depends(get_current_user))
             settings[k] = v
     await db.users.update_one({"id": user["id"]}, {"$set": {"settings": settings}})
     return settings
+
+
+# ---------------- Trade Photos (DB-backed, disk storage, token-served) ----------------
+def _public_photo(p: dict) -> dict:
+    return {
+        "id": p["id"], "trade_id": p["trade_id"], "file_name": p.get("file_name"),
+        "mime_type": p.get("mime_type"), "file_size": p.get("file_size"),
+        "display_order": p.get("display_order", 0),
+        "file_url": f"/api/photos/{p['token']}/file",
+        "created_at": p.get("created_at"),
+    }
+
+async def _delete_trade_photos(trade_id: str, user_id: str):
+    photos = await db.trade_photos.find({"trade_id": trade_id, "user_id": user_id}).to_list(1000)
+    for p in photos:
+        try:
+            os.remove(p["storage_path"])
+        except Exception:
+            pass
+    await db.trade_photos.delete_many({"trade_id": trade_id, "user_id": user_id})
+
+async def _sync_photo_meta(trade_id: str, user_id: str):
+    photos = await db.trade_photos.find({"trade_id": trade_id, "user_id": user_id}).to_list(1000)
+    photos.sort(key=lambda p: p.get("display_order", 0))
+    cover = f"/api/photos/{photos[0]['token']}/file" if photos else None
+    await db.trades.update_one({"id": trade_id, "user_id": user_id}, {"$set": {"photoCount": len(photos), "coverUrl": cover}})
+
+@api.get("/trades/{trade_id}/photos")
+async def list_photos(trade_id: str, user: dict = Depends(get_current_user)):
+    photos = await db.trade_photos.find({"trade_id": trade_id, "user_id": user["id"]}).to_list(1000)
+    photos.sort(key=lambda p: p.get("display_order", 0))
+    return [_public_photo(p) for p in photos]
+
+@api.post("/trades/{trade_id}/photos")
+async def upload_photos(trade_id: str, files: List[UploadFile] = File(...), user: dict = Depends(get_current_user)):
+    trade = await db.trades.find_one({"id": trade_id, "user_id": user["id"]})
+    if not trade:
+        raise HTTPException(status_code=404, detail="Trade not found")
+    existing = await db.trade_photos.count_documents({"trade_id": trade_id, "user_id": user["id"]})
+    dest_dir = UPLOAD_DIR / user["id"] / trade_id
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    saved = []
+    order = existing
+    for f in files:
+        if f.content_type not in ALLOWED_IMAGE_MIME:
+            raise HTTPException(status_code=400, detail=f"Unsupported file type: {f.content_type}. Use JPG, PNG or WebP.")
+        data = await f.read()
+        if len(data) > MAX_PHOTO_BYTES:
+            raise HTTPException(status_code=400, detail=f"{f.filename} exceeds 10MB limit.")
+        pid = "p_" + uuid.uuid4().hex[:10]
+        token = uuid.uuid4().hex
+        ext = os.path.splitext(f.filename or "")[1][:10] or ".img"
+        path = dest_dir / f"{pid}{ext}"
+        with open(path, "wb") as out:
+            out.write(data)
+        doc = {
+            "id": pid, "token": token, "trade_id": trade_id, "user_id": user["id"],
+            "file_name": f.filename, "mime_type": f.content_type, "file_size": len(data),
+            "storage_path": str(path), "display_order": order, "created_at": now_iso(),
+        }
+        await db.trade_photos.insert_one(dict(doc))
+        saved.append(_public_photo(doc))
+        order += 1
+    await _sync_photo_meta(trade_id, user["id"])
+    return saved
+
+@api.delete("/photos/{photo_id}")
+async def delete_photo(photo_id: str, user: dict = Depends(get_current_user)):
+    p = await db.trade_photos.find_one({"id": photo_id, "user_id": user["id"]})
+    if not p:
+        raise HTTPException(status_code=404, detail="Photo not found")
+    try:
+        os.remove(p["storage_path"])
+    except Exception:
+        pass
+    await db.trade_photos.delete_one({"id": photo_id, "user_id": user["id"]})
+    await _sync_photo_meta(p["trade_id"], user["id"])
+    return {"ok": True}
+
+@api.put("/trades/{trade_id}/photos/order")
+async def reorder_photos(trade_id: str, order: List[str], user: dict = Depends(get_current_user)):
+    for idx, pid in enumerate(order):
+        await db.trade_photos.update_one({"id": pid, "trade_id": trade_id, "user_id": user["id"]}, {"$set": {"display_order": idx}})
+    await _sync_photo_meta(trade_id, user["id"])
+    return await list_photos(trade_id, user)
+
+@api.get("/photos/{token}/file")
+async def serve_photo(token: str):
+    # Served by unguessable token -> other users cannot access by guessing trade/photo ids.
+    p = await db.trade_photos.find_one({"token": token})
+    if not p or not os.path.exists(p["storage_path"]):
+        raise HTTPException(status_code=404, detail="Not found")
+    return FileResponse(p["storage_path"], media_type=p.get("mime_type", "image/jpeg"))
 
 
 # ---------------- Economic Calendar (live, cached, modular) ----------------
@@ -336,14 +442,23 @@ def _fetch_faireconomy():
     return events
 
 def _fetch_forexfactory():
-    # Primary: TradingView (forward-looking). Fallback: faireconomy (current week only).
+    # PRIMARY: Forex Factory's official published calendar feed (faireconomy CDN) for the current week.
+    # SUPPLEMENT: TradingView for the extended past/future range (dates outside FF's week), deduped.
+    ff, tv = [], []
     try:
-        events = _fetch_tradingview()
-        if events:
-            return events
+        ff = _fetch_faireconomy()
     except Exception as e:
-        logger.warning(f"TradingView calendar failed, falling back: {e}")
-    return _fetch_faireconomy()
+        logger.warning(f"ForexFactory feed failed: {e}")
+    try:
+        tv = _fetch_tradingview()
+    except Exception as e:
+        logger.warning(f"TradingView feed failed: {e}")
+    if not ff:
+        return tv
+    ff_days = {(e["datetime"][:10]) for e in ff}
+    merged = list(ff) + [e for e in tv if e["datetime"][:10] not in ff_days]
+    merged.sort(key=lambda e: e["datetime"])
+    return merged
 
 def _get_events(force=False):
     now = _time.time()
@@ -363,7 +478,9 @@ def _get_events(force=False):
 async def economic_calendar(user: dict = Depends(get_current_user)):
     loop = asyncio.get_event_loop()
     events = await loop.run_in_executor(None, _get_events, False)
-    return {"events": events, "currencies": ALLOWED_CURRENCIES, "updatedAt": _econ_cache["ts"]}
+    horizon = max((e["datetime"] for e in events), default=None)
+    earliest = min((e["datetime"] for e in events), default=None)
+    return {"events": events, "currencies": ALLOWED_CURRENCIES, "updatedAt": _econ_cache["ts"], "horizon": horizon, "earliest": earliest}
 
 
 @api.get("/")
@@ -386,6 +503,8 @@ async def startup():
     await db.users.create_index("email", unique=True)
     await db.trades.create_index("user_id")
     await db.accounts.create_index("user_id")
+    await db.trade_photos.create_index("trade_id")
+    await db.trade_photos.create_index("token")
     admin_email = "admin@tradesentinel.com"
     if not await db.users.find_one({"email": admin_email}):
         await db.users.insert_one({

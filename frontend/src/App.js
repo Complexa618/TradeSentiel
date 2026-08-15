@@ -9,6 +9,7 @@ import Dashboard from './pages/Dashboard';
 import LogTrade from './pages/LogTrade';
 import Calendar from './pages/Calendar';
 import Strategies from './pages/Strategies';
+import Milestones from './pages/Milestones';
 import ComingSoon from './pages/ComingSoon';
 
 function Protected({ children }) {
@@ -41,7 +42,7 @@ function App() {
               <Route path="/ai-insights" element={<ComingSoon />} />
               <Route path="/vision-board" element={<ComingSoon />} />
               <Route path="/zen-zone" element={<ComingSoon />} />
-              <Route path="/milestones" element={<ComingSoon />} />
+              <Route path="/milestones" element={<Milestones />} />
               <Route path="/backtest" element={<ComingSoon />} />
             </Route>
             <Route path="/" element={<Navigate to="/dashboard" replace />} />

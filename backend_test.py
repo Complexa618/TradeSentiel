@@ -740,21 +740,51 @@ def test_economic_calendar():
         
         data = resp.json()
         
-        # Verify response structure
-        if not all(k in data for k in ["events", "currencies", "updatedAt"]):
+        # Verify response structure (including new horizon and earliest fields)
+        required_keys = ["events", "currencies", "updatedAt", "horizon", "earliest"]
+        if not all(k in data for k in required_keys):
+            missing = [k for k in required_keys if k not in data]
             log_test("GET /api/economic-calendar - response structure", False, 
-                    f"Missing required keys. Got: {list(data.keys())}")
+                    f"Missing required keys: {missing}. Got: {list(data.keys())}")
             return
         else:
             log_test("GET /api/economic-calendar - response structure", True, 
-                    "Has events, currencies, updatedAt")
+                    "Has events, currencies, updatedAt, horizon, earliest")
         
         events = data["events"]
         currencies = data["currencies"]
+        horizon = data["horizon"]
+        earliest = data["earliest"]
         
         print(f"\n📊 Total events received: {len(events)}")
+        print(f"📊 Horizon (latest event): {horizon}")
+        print(f"📊 Earliest (earliest event): {earliest}")
         
-        # Test 3: Verify currencies field equals the 8 majors
+        # Test 3: Verify horizon and earliest are non-null ISO datetime strings
+        
+        if horizon is None:
+            log_test("horizon is non-null ISO datetime string", False, "horizon is None")
+        else:
+            try:
+                from datetime import datetime as dt, timezone
+                horizon_dt = dt.fromisoformat(horizon.replace("Z", "+00:00"))
+                log_test("horizon is non-null ISO datetime string", True, f"horizon: {horizon}")
+            except Exception as e:
+                log_test("horizon is non-null ISO datetime string", False, f"Failed to parse horizon: {horizon}, error: {e}")
+                return
+        
+        if earliest is None:
+            log_test("earliest is non-null ISO datetime string", False, "earliest is None")
+        else:
+            try:
+                from datetime import datetime as dt, timezone
+                earliest_dt = dt.fromisoformat(earliest.replace("Z", "+00:00"))
+                log_test("earliest is non-null ISO datetime string", True, f"earliest: {earliest}")
+            except Exception as e:
+                log_test("earliest is non-null ISO datetime string", False, f"Failed to parse earliest: {earliest}, error: {e}")
+                return
+        
+        # Test 4: Verify currencies field equals the 8 majors
         expected_currencies = ['USD', 'EUR', 'GBP', 'JPY', 'AUD', 'CAD', 'CHF', 'NZD']
         if currencies == expected_currencies:
             log_test("currencies field equals 8 majors", True, f"currencies: {currencies}")
@@ -762,7 +792,7 @@ def test_economic_calendar():
             log_test("currencies field equals 8 majors", False, 
                     f"Expected {expected_currencies}, got {currencies}")
         
-        # Test 4: Parse datetimes and check FORWARD-LOOKING requirement
+        # Test 5: Parse datetimes and check FORWARD-LOOKING requirement
         from datetime import datetime as dt, timezone
         now = dt.now(timezone.utc)
         
@@ -808,7 +838,7 @@ def test_economic_calendar():
             log_test("All events have ONLY {id,title,currency,impact,datetime}", True, 
                     f"All {len(events)} events validated")
         
-        # Test 5: Verify all event.currency in allowed list
+        # Test 6: Verify all event.currency in allowed list
         invalid_currencies = [e["currency"] for e in events if e["currency"] not in expected_currencies]
         if not invalid_currencies:
             log_test("All event.currency in [USD,EUR,GBP,JPY,AUD,CAD,CHF,NZD]", True, 
@@ -817,7 +847,7 @@ def test_economic_calendar():
             log_test("All event.currency in [USD,EUR,GBP,JPY,AUD,CAD,CHF,NZD]", False, 
                     f"Found invalid currencies: {set(invalid_currencies)}")
         
-        # Test 6: Verify all event.impact in [High,Medium,Low]
+        # Test 7: Verify all event.impact in [High,Medium,Low]
         allowed_impacts = ["High", "Medium", "Low"]
         invalid_impacts = [e["impact"] for e in events if e["impact"] not in allowed_impacts]
         if not invalid_impacts:
@@ -827,7 +857,61 @@ def test_economic_calendar():
             log_test("All event.impact in [High,Medium,Low]", False, 
                     f"Found invalid impacts: {set(invalid_impacts)}")
         
-        # Test 7: CRITICAL - BIDIRECTIONAL COVERAGE requirement
+        # Test 8: CRITICAL - Verify horizon equals LATEST event.datetime and earliest equals EARLIEST
+        if events:
+            all_event_datetimes = []
+            for e in events:
+                try:
+                    event_dt_str = e["datetime"]
+                    all_event_datetimes.append(event_dt_str)
+                except Exception:
+                    pass
+            
+            if all_event_datetimes:
+                max_event_datetime = max(all_event_datetimes)
+                min_event_datetime = min(all_event_datetimes)
+                
+                # Verify horizon equals the latest event datetime
+                if horizon == max_event_datetime:
+                    log_test("horizon equals LATEST event.datetime", True, 
+                            f"horizon: {horizon} == max event: {max_event_datetime}")
+                else:
+                    log_test("horizon equals LATEST event.datetime", False, 
+                            f"horizon: {horizon} != max event: {max_event_datetime}")
+                
+                # Verify earliest equals the earliest event datetime
+                if earliest == min_event_datetime:
+                    log_test("earliest equals EARLIEST event.datetime", True, 
+                            f"earliest: {earliest} == min event: {min_event_datetime}")
+                else:
+                    log_test("earliest equals EARLIEST event.datetime", False, 
+                            f"earliest: {earliest} != min event: {min_event_datetime}")
+                
+                # Verify NO event has datetime > horizon
+                events_beyond_horizon = [e for e in events if e["datetime"] > horizon]
+                if not events_beyond_horizon:
+                    log_test("NO event has datetime > horizon", True, 
+                            f"All {len(events)} events are within horizon")
+                else:
+                    log_test("NO event has datetime > horizon", False, 
+                            f"Found {len(events_beyond_horizon)} events beyond horizon: {[e['datetime'] for e in events_beyond_horizon[:3]]}")
+                
+                # Verify NO event has datetime < earliest
+                events_before_earliest = [e for e in events if e["datetime"] < earliest]
+                if not events_before_earliest:
+                    log_test("NO event has datetime < earliest", True, 
+                            f"All {len(events)} events are after earliest")
+                else:
+                    log_test("NO event has datetime < earliest", False, 
+                            f"Found {len(events_before_earliest)} events before earliest: {[e['datetime'] for e in events_before_earliest[:3]]}")
+            else:
+                log_test("horizon equals LATEST event.datetime", False, "Could not parse event datetimes")
+                log_test("earliest equals EARLIEST event.datetime", False, "Could not parse event datetimes")
+        else:
+            log_test("horizon equals LATEST event.datetime", False, "No events to analyze")
+            log_test("earliest equals EARLIEST event.datetime", False, "No events to analyze")
+        
+        # Test 9: CRITICAL - BIDIRECTIONAL COVERAGE requirement
         future_count = len(future_events)
         past_count = len(past_events)
         total_count = len(events)
@@ -852,7 +936,7 @@ def test_economic_calendar():
             log_test("CRITICAL: FUTURE events (datetime >= now) count > 0", False, 
                     f"ZERO future events - FAIL! Expected > 0")
         
-        # Test 8: Verify overall date range (past + today + future)
+        # Test 10: Verify overall date range (past + today + future)
         if events:
             all_datetimes = []
             for e in events:
