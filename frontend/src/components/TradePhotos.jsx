@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { useApp } from '../context/AppContext';
 import { Upload, X, Trash2, ChevronLeft, ChevronRight, ImageIcon, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -21,19 +22,35 @@ export function Lightbox({ items, index, onClose, onIndex }) {
     return () => window.removeEventListener('keydown', h);
   }, [go, onClose]);
   if (index == null || !items[i]) return null;
-  return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/85 backdrop-blur-md animate-in fade-in-0" onClick={onClose}>
-      <button className="absolute top-5 right-5 h-10 w-10 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition" onClick={onClose}><X className="h-5 w-5" /></button>
-      <div className="absolute top-6 left-1/2 -translate-x-1/2 text-sm text-gray-300 font-mono-num">{i + 1} / {items.length}</div>
+  return createPortal(
+    <div
+      className="animate-in fade-in-0 duration-200"
+      style={{ position: 'fixed', inset: 0, width: '100vw', height: '100vh', zIndex: 9999, background: 'rgba(0,0,0,0.98)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+      onClick={onClose}
+    >
+      {/* Centered image layer — one flex container, one image, always centered */}
+      <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <img
+          key={i}
+          src={photoSrc(items[i])}
+          alt="trade chart"
+          onClick={(e) => e.stopPropagation()}
+          style={{ maxWidth: '100%', maxHeight: '100%', width: 'auto', height: 'auto', objectFit: 'contain' }}
+          className="animate-in zoom-in-95 fade-in-0 duration-200"
+        />
+      </div>
+
+      {/* Controls sit ABOVE the image layer and never affect its centering */}
+      <button className="absolute top-5 right-5 z-10 h-11 w-11 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition" onClick={(e) => { e.stopPropagation(); onClose(); }} aria-label="Close"><X className="h-6 w-6" /></button>
+      <div className="absolute top-5 left-1/2 -translate-x-1/2 z-10 text-sm text-gray-300 font-mono-num bg-white/10 rounded-full px-3 py-1">{i + 1} / {items.length}</div>
       {items.length > 1 && (
         <>
-          <button onClick={(e) => { e.stopPropagation(); go(-1); }} className="absolute left-4 md:left-8 h-11 w-11 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition"><ChevronLeft className="h-6 w-6" /></button>
-          <button onClick={(e) => { e.stopPropagation(); go(1); }} className="absolute right-4 md:right-8 h-11 w-11 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition"><ChevronRight className="h-6 w-6" /></button>
+          <button onClick={(e) => { e.stopPropagation(); go(-1); }} className="absolute left-4 md:left-8 top-1/2 -translate-y-1/2 z-10 h-12 w-12 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition"><ChevronLeft className="h-7 w-7" /></button>
+          <button onClick={(e) => { e.stopPropagation(); go(1); }} className="absolute right-4 md:right-8 top-1/2 -translate-y-1/2 z-10 h-12 w-12 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition"><ChevronRight className="h-7 w-7" /></button>
         </>
       )}
-      <img src={photoSrc(items[i])} alt="trade chart" onClick={(e) => e.stopPropagation()}
-        className="max-h-[86vh] max-w-[92vw] rounded-xl border border-white/10 shadow-2xl animate-in zoom-in-95 duration-200" />
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -101,13 +118,16 @@ export default function TradePhotos({ tradeId = null, pending, onPending }) {
       <input ref={fileRef} type="file" accept="image/*" multiple hidden onChange={(e) => { handleFiles(e.target.files); e.target.value = ''; }} />
 
       {items.length > 0 && (
-        <div className="mt-3 grid grid-cols-3 sm:grid-cols-4 gap-2">
+        <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
           {items.map((p, idx) => (
-            <div key={p.id} className="group relative aspect-square rounded-lg overflow-hidden border border-white/10">
-              <img src={photoSrc(p)} alt="" onClick={() => setLight(idx)} className="h-full w-full object-cover cursor-zoom-in transition group-hover:scale-105" />
+            <figure key={p.id} className="group relative rounded-xl border border-white/10 bg-black/25 shadow-[0_8px_30px_-12px_rgba(0,0,0,0.7)] overflow-hidden">
+              <img src={photoSrc(p)} alt="" onClick={() => setLight(idx)}
+                className="w-full h-auto max-h-72 object-contain cursor-zoom-in transition duration-200 group-hover:brightness-110 group-hover:scale-[1.01]" />
+              <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/30 to-transparent opacity-0 group-hover:opacity-100 transition" />
+              <span className="pointer-events-none absolute bottom-2 left-2 text-[11px] text-white/90 bg-black/50 rounded px-2 py-0.5 opacity-0 group-hover:opacity-100 transition">Click to open</span>
               <button type="button" onClick={() => (serverMode ? removeServer(p.id) : removePending(p.id))}
-                className="absolute top-1 right-1 h-6 w-6 rounded-md bg-black/70 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white hover:bg-red-500/80 transition"><Trash2 className="h-3.5 w-3.5" /></button>
-            </div>
+                className="absolute top-2 right-2 h-7 w-7 rounded-md bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white hover:bg-red-500/80 transition"><Trash2 className="h-3.5 w-3.5" /></button>
+            </figure>
           ))}
         </div>
       )}

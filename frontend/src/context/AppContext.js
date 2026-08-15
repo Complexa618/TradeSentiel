@@ -9,7 +9,7 @@ const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
 const TOKEN_KEY = 'ts_token';
 
-const api = axios.create({ baseURL: API });
+const api = axios.create({ baseURL: API, withCredentials: true });
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem(TOKEN_KEY);
   if (token) config.headers.Authorization = `Bearer ${token}`;
@@ -29,21 +29,30 @@ export function AppProvider({ children }) {
     setData({ ...emptyData(), ...res.data });
   }, []);
 
-  // Restore session on load
+  // Restore session on load (supports both localStorage JWT and Emergent cookie session)
   useEffect(() => {
     (async () => {
-      const token = localStorage.getItem(TOKEN_KEY);
-      if (token) {
-        try {
-          const me = await api.get('/auth/me');
-          setUser(me.data.user);
-          await fetchData();
-        } catch {
-          localStorage.removeItem(TOKEN_KEY);
-        }
+      // If returning from Google OAuth, let AuthCallback exchange the session_id first.
+      if (window.location.hash?.includes('session_id=')) { setReady(true); return; }
+      try {
+        const me = await api.get('/auth/me');
+        setUser(me.data.user);
+        await fetchData();
+      } catch {
+        localStorage.removeItem(TOKEN_KEY);
       }
       setReady(true);
     })();
+  }, [fetchData]);
+
+  // Complete Emergent Google OAuth: exchange session_id for a cookie session
+  const googleLogin = useCallback(async (sessionId) => {
+    try {
+      const res = await api.post('/auth/session', {}, { headers: { 'X-Session-ID': sessionId } });
+      setUser(res.data.user);
+      await fetchData();
+      return { ok: true };
+    } catch (e) { return { error: errMsg(e) }; }
   }, [fetchData]);
 
   const signup = useCallback(async ({ name, email, password }) => {
@@ -67,6 +76,7 @@ export function AppProvider({ children }) {
   }, [fetchData]);
 
   const logout = useCallback(() => {
+    api.post('/auth/logout').catch(() => {});
     localStorage.removeItem(TOKEN_KEY);
     setUser(null);
     setData(emptyData());
@@ -156,11 +166,11 @@ export function AppProvider({ children }) {
 
   const value = useMemo(() => ({
     user, data, ready,
-    signup, login, logout,
+    signup, login, logout, googleLogin,
     addTrade, updateTrade, deleteTrade, loadDemo, clearData,
     addAccount, deleteAccount, updateGoal, saveGoals, setSettings, fetchEconomicCalendar,
     uploadPhotos, listPhotos, deletePhoto, reorderPhotos,
-  }), [user, data, ready, signup, login, logout, addTrade, updateTrade, deleteTrade, loadDemo, clearData, addAccount, deleteAccount, updateGoal, saveGoals, setSettings, fetchEconomicCalendar, uploadPhotos, listPhotos, deletePhoto, reorderPhotos]);
+  }), [user, data, ready, signup, login, logout, googleLogin, addTrade, updateTrade, deleteTrade, loadDemo, clearData, addAccount, deleteAccount, updateGoal, saveGoals, setSettings, fetchEconomicCalendar, uploadPhotos, listPhotos, deletePhoto, reorderPhotos]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }

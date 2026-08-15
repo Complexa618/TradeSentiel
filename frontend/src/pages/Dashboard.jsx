@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useOutletContext, useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
-import { computeStats, equityCurve, dailyPnl, sessionBreakdown, strategyLeaderboard, filterTrades, distinctStrategies, fmtMoney, fmtPct, fmtR } from '../lib/calc';
+import { computeStats, equityCurve, dailyPnl, sessionBreakdown, strategyLeaderboard, filterTrades, distinctStrategies, fmtMoney, fmtPct, fmtR, startingBalance, totalBalance as calcTotalBalance } from '../lib/calc';
 import { AreaChart, LineChartSimple, BarChart, Gauge } from '../components/Charts';
+import EquityChart from '../components/EquityChart';
 import { MOTIVATION } from '../mock';
 import { SESSIONS } from '../mock';
 import ManageAccountsModal from '../components/ManageAccountsModal';
@@ -50,7 +51,7 @@ export default function Dashboard() {
   const allTimeStats = useMemo(() => computeStats(trades), [trades]);
   const rangedTrades = filtered;
 
-  const equity = useMemo(() => equityCurve(rangedTrades), [rangedTrades]);
+  const equity = useMemo(() => equityCurve(rangedTrades, startingBalance(data.accounts)), [rangedTrades, data.accounts]);
   const daily = useMemo(() => dailyPnl(rangedTrades), [rangedTrades]);
   const winRateSeries = useMemo(() => {
     let wins = 0;
@@ -58,7 +59,7 @@ export default function Dashboard() {
     return sorted.map((t, i) => { if (Number(t.pnl) > 0) wins++; return (wins / (i + 1)) * 100; });
   }, [rangedTrades]);
   const sessions = useMemo(() => sessionBreakdown(filtered), [filtered]);
-  const totalBalance = data.accounts.reduce((s, a) => s + Number(a.balance || 0), 0);
+  const totalBalance = calcTotalBalance(data.accounts, trades);
   const todayPnl = useMemo(() => {
     const today = new Date().toISOString().slice(0, 10);
     return trades.filter((t) => (t.date || '').slice(0, 10) === today && t.status === 'closed')
@@ -104,7 +105,7 @@ export default function Dashboard() {
         <FilterSelect label="Session" value={fSession} onChange={setFSession} options={SESSIONS} />
         <div className="flex gap-1 bg-white/[0.04] rounded-lg p-1">
           {Object.keys(RANGES).map((r) => (
-            <button key={r} onClick={() => setRange(r)} className={`px-3 py-1 rounded-md text-xs font-medium transition ${range === r ? 'bg-emerald-500/20 text-emerald-300' : 'text-gray-500 hover:text-gray-300'}`}>{r}</button>
+            <button key={r} data-testid={`filter-range-${r.toLowerCase()}`} onClick={() => setRange(r)} className={`px-3 py-1 rounded-md text-xs font-medium transition ${range === r ? 'bg-emerald-500/20 text-emerald-300' : 'text-gray-500 hover:text-gray-300'}`}>{r}</button>
           ))}
         </div>
         {filtersActive && (
@@ -141,7 +142,7 @@ export default function Dashboard() {
             </div>
             <div className="mt-4">
               <div className="label-caps text-gray-500">Total Balance</div>
-              <div className="text-2xl font-bold text-white font-mono-num mt-1">{fmtMoney(totalBalance, hideBalance)}</div>
+              <div className="text-2xl font-bold text-white font-mono-num mt-1" data-testid="total-balance-value">{fmtMoney(totalBalance, hideBalance)}</div>
             </div>
           </div>
           <div>
@@ -225,17 +226,17 @@ export default function Dashboard() {
           </div>
           <div className="flex gap-1 bg-white/[0.04] rounded-lg p-1">
             {Object.keys(RANGES).map((r) => (
-              <button key={r} onClick={() => setRange(r)} className={`px-3 py-1 rounded-md text-xs font-medium transition ${range === r ? 'bg-emerald-500/20 text-emerald-300' : 'text-gray-500 hover:text-gray-300'}`}>{r}</button>
+              <button key={r} data-testid={`analytics-range-${r.toLowerCase()}`} onClick={() => setRange(r)} className={`px-3 py-1 rounded-md text-xs font-medium transition ${range === r ? 'bg-emerald-500/20 text-emerald-300' : 'text-gray-500 hover:text-gray-300'}`}>{r}</button>
             ))}
           </div>
         </div>
         <div className="flex gap-2 mt-4 border-b border-white/[0.06]">
           {[['equity', 'Equity Curve'], ['winrate', 'Win Rate'], ['daily', 'Daily P&L']].map(([k, l]) => (
-            <button key={k} onClick={() => setChartTab(k)} className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px transition ${chartTab === k ? 'border-emerald-400 text-emerald-400' : 'border-transparent text-gray-500 hover:text-gray-300'}`}>{l}</button>
+            <button key={k} data-testid={`chart-tab-${k}`} onClick={() => setChartTab(k)} className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px transition ${chartTab === k ? 'border-emerald-400 text-emerald-400' : 'border-transparent text-gray-500 hover:text-gray-300'}`}>{l}</button>
           ))}
         </div>
         <div className="mt-5">
-          {chartTab === 'equity' && <AreaChart data={equity} height={240} />}
+          {chartTab === 'equity' && <EquityChart data={equity} startBalance={startingBalance(data.accounts)} height={300} />}
           {chartTab === 'winrate' && <LineChartSimple data={winRateSeries} height={240} />}
           {chartTab === 'daily' && <BarChart data={daily} height={240} />}
         </div>

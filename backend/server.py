@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, status
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, Request, Response
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -30,6 +30,8 @@ db = client[os.environ['DB_NAME']]
 JWT_SECRET = os.environ.get('JWT_SECRET', 'trade-sentinel-secret-key-change-me')
 JWT_ALG = 'HS256'
 JWT_DAYS = 30
+EMERGENT_SESSION_URL = "https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data"
+SESSION_DAYS = 7
 
 pwd = CryptContext(schemes=['bcrypt'], deprecated='auto')
 security = HTTPBearer(auto_error=False)
@@ -95,7 +97,7 @@ def make_token(uid: str) -> str:
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALG)
 
 def public_user(u: dict) -> dict:
-    return {"id": u["id"], "name": u["name"], "email": u["email"], "username": u["username"]}
+    return {"id": u["id"], "name": u["name"], "email": u["email"], "username": u["username"], "picture": u.get("picture")}
 
 def derive(trade: dict) -> dict:
     risk = float(trade.get("risk") or 0)
@@ -111,17 +113,41 @@ def derive(trade: dict) -> dict:
         trade["date"] = trade.get("date") or now_iso()
     return trade
 
-async def get_current_user(cred: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> dict:
-    if cred is None:
-        raise HTTPException(status_code=401, detail="Not authenticated")
+async def _resolve_user(token: Optional[str]) -> Optional[dict]:
+    if not token:
+        return None
+    # 1. Emergent session token (cookie or bearer)
+    sess = await db.user_sessions.find_one({"session_token": token})
+    if sess:
+        exp = sess.get("expires_at")
+        if isinstance(exp, str):
+            exp = datetime.fromisoformat(exp)
+        if exp is not None and exp.tzinfo is None:
+            exp = exp.replace(tzinfo=timezone.utc)
+        if exp is not None and exp < datetime.now(timezone.utc):
+            return None
+        u = await db.users.find_one({"id": sess["user_id"]})
+        if u:
+            return u
+    # 2. Existing email/password JWT
     try:
-        payload = jwt.decode(cred.credentials, JWT_SECRET, algorithms=[JWT_ALG])
-        uid = payload.get("sub")
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALG])
+        u = await db.users.find_one({"id": payload.get("sub")})
+        if u:
+            return u
     except jwt.PyJWTError:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
-    u = await db.users.find_one({"id": uid})
+        pass
+    return None
+
+async def get_current_user(request: Request) -> dict:
+    token = request.cookies.get("session_token")
+    if not token:
+        auth = request.headers.get("Authorization", "")
+        if auth.startswith("Bearer "):
+            token = auth.split(" ", 1)[1]
+    u = await _resolve_user(token)
     if not u:
-        raise HTTPException(status_code=401, detail="User not found")
+        raise HTTPException(status_code=401, detail="Not authenticated")
     return u
 
 def clean(doc: dict) -> dict:
@@ -158,6 +184,69 @@ async def login(body: LoginIn):
 @api.get("/auth/me")
 async def me(user: dict = Depends(get_current_user)):
     return {"user": public_user(user)}
+
+@api.post("/auth/session")
+async def create_session(request: Request, response: Response):
+    """Exchange an Emergent OAuth session_id for a stored session + httpOnly cookie."""
+    session_id = request.headers.get("X-Session-ID")
+    if not session_id:
+        raise HTTPException(status_code=400, detail="Missing session id")
+
+    def _fetch():
+        return requests.get(EMERGENT_SESSION_URL, headers={"X-Session-ID": session_id}, timeout=15)
+    try:
+        r = await asyncio.to_thread(_fetch)
+    except Exception:
+        raise HTTPException(status_code=502, detail="Auth provider unreachable")
+    if r.status_code != 200:
+        raise HTTPException(status_code=401, detail="Invalid or expired session")
+    data = r.json()
+    email = (data.get("email") or "").lower()
+    if not email:
+        raise HTTPException(status_code=400, detail="No email returned from provider")
+    name = data.get("name") or email.split("@")[0]
+    picture = data.get("picture")
+    session_token = data.get("session_token")
+    if not session_token:
+        raise HTTPException(status_code=502, detail="No session token from provider")
+
+    u = await db.users.find_one({"email": email})
+    if not u:
+        uid = "u_" + uuid.uuid4().hex[:10]
+        username = "".join(c for c in (name or email).lower() if c.isalnum())[:14] or "trader"
+        u = {
+            "id": uid, "name": name, "email": email, "username": username,
+            "picture": picture, "auth": "google",
+            "goals": DEFAULT_GOALS, "settings": {"hideBalance": False, "hideUsername": False},
+            "created_at": now_iso(),
+        }
+        await db.users.insert_one(dict(u))
+    else:
+        await db.users.update_one({"id": u["id"]}, {"$set": {"picture": picture or u.get("picture")}})
+        u["picture"] = picture or u.get("picture")
+
+    expires_at = datetime.now(timezone.utc) + timedelta(days=SESSION_DAYS)
+    await db.user_sessions.update_one(
+        {"session_token": session_token},
+        {"$set": {"user_id": u["id"], "session_token": session_token,
+                  "expires_at": expires_at, "created_at": datetime.now(timezone.utc)}},
+        upsert=True,
+    )
+    response.set_cookie(key="session_token", value=session_token, httponly=True,
+                        secure=True, samesite="none", path="/", max_age=SESSION_DAYS * 24 * 3600)
+    return {"user": public_user(u)}
+
+@api.post("/auth/logout")
+async def logout(request: Request, response: Response):
+    token = request.cookies.get("session_token")
+    if not token:
+        auth = request.headers.get("Authorization", "")
+        if auth.startswith("Bearer "):
+            token = auth.split(" ", 1)[1]
+    if token:
+        await db.user_sessions.delete_one({"session_token": token})
+    response.delete_cookie("session_token", path="/")
+    return {"ok": True}
 
 
 # ---------------- Aggregate ----------------
@@ -505,6 +594,7 @@ async def startup():
     await db.accounts.create_index("user_id")
     await db.trade_photos.create_index("trade_id")
     await db.trade_photos.create_index("token")
+    await db.user_sessions.create_index("session_token", unique=True)
     admin_email = "admin@tradesentinel.com"
     if not await db.users.find_one({"email": admin_email}):
         await db.users.insert_one({

@@ -94,15 +94,33 @@ export function computeStats(trades) {
   };
 }
 
-export function equityCurve(trades) {
+// Sum of realized P&L across all closed trades
+export const realizedPnl = (trades) => closedTrades(trades).reduce((s, t) => s + Number(t.pnl || 0), 0);
+
+// Sum of account starting balances (baseline capital)
+export const startingBalance = (accounts = []) => accounts.reduce((s, a) => s + Number(a.balance || 0), 0);
+
+// Total balance = starting capital + realized P&L
+export const totalBalance = (accounts, trades) => startingBalance(accounts) + realizedPnl(trades);
+
+// Equity curve baselined at starting capital, growing chronologically per closed trade.
+export function equityCurve(trades, base = 0) {
   const closed = closedTrades(trades)
     .slice()
     .sort((a, b) => new Date(a.date || a.entryTime) - new Date(b.date || b.entryTime));
-  let cum = 0;
-  return closed.map((t) => {
+  let cum = Number(base) || 0;
+  const points = [];
+  // Anchor at the starting balance, dated just before the first trade
+  if (closed.length) {
+    const firstDate = new Date(closed[0].date || closed[0].entryTime);
+    const anchor = isNaN(firstDate) ? new Date() : new Date(firstDate.getTime() - 86400000);
+    points.push({ date: anchor.toISOString(), value: cum, symbol: 'Start' });
+  }
+  closed.forEach((t) => {
     cum += Number(t.pnl || 0);
-    return { date: t.date || t.entryTime, value: cum, symbol: t.symbol };
+    points.push({ date: t.date || t.entryTime, value: cum, symbol: t.symbol });
   });
+  return points;
 }
 
 export function dailyPnl(trades) {

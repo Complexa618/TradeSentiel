@@ -5,15 +5,19 @@ export function AreaChart({ data, height = 220, color = '#34d399' }) {
   if (!data || data.length < 2) return <Empty height={height} />;
   const w = 600;
   const values = data.map((d) => d.value);
-  const min = Math.min(...values, 0);
-  const max = Math.max(...values, 0);
+  const rawMin = Math.min(...values);
+  const rawMax = Math.max(...values);
+  const margin = (rawMax - rawMin) * 0.08 || Math.abs(rawMax) * 0.02 || 1;
+  const min = rawMin - margin;
+  const max = rawMax + margin;
   const range = max - min || 1;
   const pad = 10;
   const x = (i) => (i / (data.length - 1)) * (w - pad * 2) + pad;
   const y = (v) => height - pad - ((v - min) / range) * (height - pad * 2);
   const line = data.map((d, i) => `${i === 0 ? 'M' : 'L'} ${x(i).toFixed(1)} ${y(d.value).toFixed(1)}`).join(' ');
   const area = `${line} L ${x(data.length - 1)} ${height - pad} L ${x(0)} ${height - pad} Z`;
-  const zeroY = y(0);
+  // Reference line at the starting baseline (first point)
+  const baseY = y(values[0]);
   return (
     <svg viewBox={`0 0 ${w} ${height}`} className="w-full" style={{ height }} preserveAspectRatio="none">
       <defs>
@@ -22,7 +26,7 @@ export function AreaChart({ data, height = 220, color = '#34d399' }) {
           <stop offset="100%" stopColor={color} stopOpacity="0" />
         </linearGradient>
       </defs>
-      <line x1={pad} x2={w - pad} y1={zeroY} y2={zeroY} stroke="rgba(255,255,255,0.12)" strokeDasharray="4 4" />
+      <line x1={pad} x2={w - pad} y1={baseY} y2={baseY} stroke="rgba(255,255,255,0.12)" strokeDasharray="4 4" />
       <path d={area} fill="url(#areaFill)" />
       <path d={line} fill="none" stroke={color} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
     </svg>

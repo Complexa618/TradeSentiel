@@ -1,0 +1,35 @@
+{
+  "summary": "Frontend regression tests for Trade Sentinel bug fixes: dashboard financial calculations and full-screen photo lightbox. All 5 requested checks passed.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_results": {
+    "dashboard_total_balance": "PASS — Displays $117,205.00 (accounts 112,480 + realized P&L 4,725).",
+    "dashboard_metrics": "PASS — Today's Group P&L $600.00, Net P/L $4,725.00, Max Win $1,200.00, Max Loss -$200.00, Avg R:R 1.45R, Win Rate 70%.",
+    "equity_curve": "PASS — On 'All' range, curve starts near baseline (~ starting balance) and trends upward chronologically to ~ total balance. Not flat, not starting at $0. Confirmed via SVG render and screenshot.",
+    "lightbox_portrait_600x1200": "PASS — Overlay covers full 1920x1080 viewport (top=0,left=0); image scaled to 540x1080 and horizontally centered (left=690 → center=960=vp/2). Vertically fills viewport.",
+    "lightbox_wide_1600x500": "PASS — After ArrowRight nav to 2nd image, image 1600x500 positioned top=290 left=160 → center (960, 540) exactly matches viewport center. Perfectly centered both axes.",
+    "lightbox_navigation": "PASS — Right chevron / ArrowRight cycles from portrait to wide image; both remain centered.",
+    "lightbox_close_x": "PASS — Top-right X button closes lightbox (fixed z=9999 portal element removed).",
+    "lightbox_close_esc": "PASS — ESC key closes lightbox.",
+    "lightbox_overlay_coverage": "PASS — Overlay is createPortal'd to document.body with position:fixed inset:0, zIndex 9999, background rgba(0,0,0,0.98). Sidebar/top bar are fully covered (only a faint 2% background bleed which is intentional design)."
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "calc.js equityCurve anchors initial point at first-trade date rather than a truly pre-trade timestamp — visually acceptable but the 'Start' anchor and first trade share the same date value, causing a very short flat segment at the start. Consider anchoring at (firstTradeDate - 1 day) or account creation date for a cleaner curve.",
+    "Lightbox inner flex wrapper has both position:absolute inset:0 and the parent uses display:flex with alignItems/justifyContent center — the inner wrapper is redundant. Not a bug, minor cleanup opportunity.",
+    "Charts.jsx AreaChart Y-domain uses 8% margin which works well; no changes needed."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (skipped)", "frontend": "100%"},
+  "test_credentials": "admin@tradesentinel.com / Sentinel@2025 (worked)",
+  "seed_data_creation": "Used pre-existing demo data (10 trades, 2 accounts) — no new seeding needed. Trade NAS100 (2026-08-15) had 2 photos (portrait 600x1200 + wide 1600x500).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Both reported bugs verified fixed on the deployed preview URL. Dashboard shows Total Balance $117,205.00 exactly. Equity Curve trends upward from starting balance baseline. Fullscreen lightbox covers full viewport and centers images of any aspect ratio at (vp/2, vp/2). ESC and X close the lightbox; ArrowRight/Left navigate. No further action needed unless product spec changes.",
+  "rca of the issue": "N/A — both bugs already fixed by main agent; regression confirmed."
+}

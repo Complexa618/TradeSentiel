@@ -1,0 +1,47 @@
+{
+  "summary": "Frontend-only validation of the redesigned Equity Curve on the Dashboard. All acceptance criteria for the redesign passed: single green line, gradient fill, right-side currency Y-axis, bottom date labels, working hover tooltip with dashed crosshair, no red / no 'Minimum' series, live legend showing $117,205 = 112,480 startBalance + 4,725 realized P&L. Range filters (All / 7D / 30D / 90D / 1Y) update the chart smoothly without page reloads and never mutate the Total Balance card. Empty state renders correctly when there are no trades ('No equity data yet' + 'Log your first trade to start building your equity curve.'). Demo data restored via POST /api/trades/demo after empty-state test.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "DELETE /api/trades", "issue": "Endpoint also deletes accounts (server.py line 218 `await db.accounts.delete_many(...)`). The review spec / user contract describes this endpoint as 'clear the journal / so there are no trades', so also wiping accounts is surprising. During the empty-state test the starting balance dropped to $0 (0 accounts) instead of remaining at $112,480. Empty-state chart still rendered correctly, but the starting balance figure shown is $0 rather than the desired $112,480. Consider splitting the two concerns or renaming the endpoint (e.g. DELETE /api/data)."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "acceptance_test_results": {
+    "single_green_line_no_red": "PASS - only 2 SVG paths with stroke #34d399 (line + area); no red strokes anywhere",
+    "no_Minimum_series_or_legend": "PASS - 'Minimum' text absent from the entire page",
+    "right_side_y_axis_currency": "PASS - $110,000 -> $118,000 rendered on the right side",
+    "bottom_date_x_axis": "PASS - Aug 2 -> Aug 15 labels rendered",
+    "legend_equity_value": "PASS - legend reads 'Equity  $117,205'",
+    "data_consistency": "PASS - equity endpoint = $117,205 = startingBalance(112,480) + realizedPnl(4,725) = Total Balance card",
+    "curve_starts_at_start_balance_not_zero": "PASS - anchor point equal to starting balance placed one day before first trade, chart Y range 110k-118k (never touches 0)",
+    "hover_tooltip": "PASS - hover produced tooltip 'Aug 9, 2026 / $115,280' with dashed vertical crosshair line",
+    "tooltip_no_forbidden_fields": "PASS - no Minimum/Risk/Reward text in tooltip",
+    "range_filters_All_7D_30D_90D_1Y": "PASS - all five buttons switch chart smoothly, no full page reload, Total Balance card unchanged at $117,205",
+    "session_filter_analytics_only": "PASS - Session dropdown ('All Sessions' custom dropdown) does not mutate Total Balance card",
+    "empty_state": "PASS - 'No equity data yet' + 'Log your first trade to start building your equity curve.' rendered; starting balance shown as $0 because DELETE /api/trades also cleared accounts (see backend minor issue)",
+    "restore_demo_data": "PASS - POST /api/trades/demo restored $117,205 and 10 trades"
+  },
+  "test_report_links": [],
+  "action_items": [
+    "(Optional / minor) Decide whether DELETE /api/trades should really also delete accounts. If yes, keep as-is but note it in docs; if no, split so /api/trades only clears trades and starting balance ($112,480) survives the empty-state view."
+  ],
+  "critical_code_review_comments": [
+    "Interactive elements (range buttons, chart tab buttons, filter dropdowns, EquityChart SVG) have NO data-testid attributes. Testing had to fall back to role/text selectors. Recommend adding data-testid to at least: range buttons (range-all, range-7d ...), chart tab buttons (tab-equity, tab-winrate, tab-daily), EquityChart wrapper (equity-chart), and Total Balance value (total-balance-value).",
+    "EquityChart.jsx (211 lines) is well-scoped and self-contained; nice use of ResizeObserver, Catmull-Rom smoothing and niceScale. No issues found.",
+    "calc.js equityCurve() correctly anchors first point at starting balance dated firstTradeDate - 1 day, then cumulates chronologically. Matches spec.",
+    "server.py DELETE /api/trades semantically overloaded (also clears accounts) - see backend minor issue."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (frontend-only run)", "frontend": "100%"},
+  "test_credentials": "admin@tradesentinel.com / Sentinel@2025 (from review request; file /app/memory/test_credentials.md is empty)",
+  "seed_data_creation": "None. Used existing demo data (POST /api/trades/demo used only to restore after empty-state test).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Equity Curve redesign is verified end-to-end (visual, data, hover, filters, empty state, restore). The only open item is a minor backend semantic question about DELETE /api/trades also clearing accounts. Frontend has no data-testid on the new chart or filter buttons - if next iteration adds testids, tests can be tightened.",
+  "rca of the issue": "N/A - no functional bugs found in the Equity Curve redesign."
+}
