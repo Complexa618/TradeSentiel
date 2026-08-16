@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import { fmtMoney, fmtR, fmtDuration } from '../lib/calc';
@@ -42,17 +42,17 @@ export default function LogTrade() {
     });
   }, [filtered, sort]);
 
-  const acctPnl = (t) => {
+  const acctPnl = useCallback((t) => {
     if (acctFilter === 'all') return Number(t.pnl || 0);
     const a = (t.accounts || []).find((x) => x.account_id === acctFilter);
     return a ? Number(a.allocated_pnl || 0) : Number(t.pnl || 0);
-  };
+  }, [acctFilter]);
   const stats = useMemo(() => {
     const closed = filtered.filter((t) => t.status === 'closed');
     const wins = closed.filter((t) => Number(t.pnl) > 0).length;
     const pnl = closed.reduce((s, t) => s + acctPnl(t), 0);
     return { count: filtered.length, pnl, win: closed.length ? (wins / closed.length) * 100 : 0 };
-  }, [filtered, acctFilter]);
+  }, [filtered, acctPnl]);
 
   const exportCSV = () => {
     const headers = ['Symbol', 'Direction', 'Risk', 'Reward', 'Profit', 'RR', 'Strategy', 'Session', 'Entry Time', 'Exit Time', 'Duration', 'Status', 'Date'];
