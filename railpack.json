@@ -1,0 +1,18 @@
+{
+  "$schema": "https://railpack.com/schema.json",
+  "build": {
+    "steps": [
+      {
+        "name": "frontend",
+        "cwd": "frontend",
+        "run": ["npm install --no-fund --no-audit", "npm run build"]
+      },
+      {
+        "name": "backend",
+        "cwd": "backend",
+        "run": ["python -m pip install --upgrade pip", "python -m pip install -r requirements.txt"]
+      }
+    ]
+  },
+  "start": "./start.sh"
+}
