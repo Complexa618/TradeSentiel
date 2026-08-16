@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useOutletContext, useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
-import { computeStats, equityCurve, dailyPnl, sessionBreakdown, strategyLeaderboard, filterTrades, distinctStrategies, fmtMoney, fmtPct, fmtR, startingBalance, totalBalance as calcTotalBalance } from '../lib/calc';
+import { computeStats, equityCurve, dailyPnl, sessionBreakdown, strategyLeaderboard, filterTrades, distinctStrategies, fmtMoney, fmtPct, fmtR, startingBalance, totalBalance as calcTotalBalance, accountBalance, accountPnl } from '../lib/calc';
 import { AreaChart, LineChartSimple, BarChart, Gauge } from '../components/Charts';
 import EquityChart from '../components/EquityChart';
 import { Avatar } from '../components/Avatar';
@@ -145,7 +145,20 @@ export default function Dashboard() {
           <div>
             <div className="label-caps text-gray-500">Accounts</div>
             <div className="text-2xl font-bold text-white font-mono-num mt-1">{data.accounts.length}</div>
-            <div className="text-xs text-gray-600 mt-1">{data.accounts.length ? data.accounts.map((a) => a.name).join(', ') : 'No accounts yet'}</div>
+            {data.accounts.length ? (
+              <div className="mt-1.5 space-y-1" data-testid="account-breakdown">
+                {data.accounts.map((a) => {
+                  const bal = accountBalance(a, trades);
+                  const pl = accountPnl(a.id, trades);
+                  return (
+                    <div key={a.id} className="flex items-center justify-between gap-2 text-xs">
+                      <span className="text-gray-400 truncate">{a.name}</span>
+                      <span className="font-mono-num text-gray-300">{fmtMoney(bal, hideBalance)} <span className={pl >= 0 ? 'text-emerald-400' : 'text-red-400'}>({pl >= 0 ? '+' : ''}{fmtMoney(pl, hideBalance)})</span></span>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : <div className="text-xs text-gray-600 mt-1">No accounts yet</div>}
           </div>
           <div>
             <div className="label-caps text-gray-500 flex items-center gap-1">Today's Group P&L <ExternalLink className="h-3 w-3" /></div>

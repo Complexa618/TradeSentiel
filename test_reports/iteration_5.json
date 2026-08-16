@@ -1,0 +1,39 @@
+{
+  "summary": "Validated new Main News (USD-first + currency selector persisted) and Full Milestone Management + Multi-Condition + new requirement types on Trade Sentinel. Backend pytest suite (19/19 PASS) covers /api/economic-calendar structure, POST /api/achievements with multi-condition body (xp_reward:150, 3 conditions) → /api/progress returns multi=true, target=3, per-condition breakdown, current==count-of-unlocked; POST /api/achievements/{id}/duplicate returns is_custom=true with title '… — Custom'; PUT /api/achievements/{id} status cycle visible→hidden→archived (hidden still evaluated, archived excluded from evaluated list); PUT /api/achievements/order reorders and persists display_order; new requirement types (win_count, loss_count, daily_pnl, weekly_pnl, monthly_pnl, avg_rr, rr_above with meta, tag_used with meta, avoid_tag with meta) all evaluate with positive current values against the demo dataset; achievementsSummary.total equals count of visible-status milestones. Frontend Playwright validated Main News: default USD, countdown visible ('USD FOMC Minutes 3d 20h'), currency menu opens, EUR selection changes shown event, persists across reload, switch back to USD OK. Milestones: /milestones renders progress-page, customize-btn opens customize-panel with all 5 toggles, 15 SYSTEM manage rows, duplicate creates 16th row with CUSTOM badge and '— Custom' suffix, visibility button cycles (hidden custom disappears from grid), delete with inline confirm removes the row and shows 'Milestone removed' toast. Builder: ab-title/ab-desc/ab-xp fields work, ab-multi checkbox reveals ab-cond-0, ab-add-cond adds a second condition, ab-save creates the milestone which appears in grid with CUSTOM + MULTI badges. Achievement detail shows 'X / N conditions complete', per-condition checklist (✓ items), '+150 XP' reward, Unlocked date. Cleanup performed.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "acceptance_test_results": {
+    "GET /api/economic-calendar": "PASS – events[] with {title,currency,impact,datetime}; currencies list includes USD/EUR/GBP/JPY/AUD/CAD/CHF/NZD.",
+    "POST /api/achievements (multi-condition)": "PASS – returns is_custom=true, xp_reward=150, conditions array of 3.",
+    "GET /api/progress multi eval": "PASS – multi=true, target=3, conditions[] with current/target/percent/unlocked per condition, current==sum(unlocked conds).",
+    "POST /api/achievements/{id}/duplicate": "PASS – title 'First Blood — Custom', is_custom=true, new id.",
+    "PUT /api/achievements/{id} status": "PASS – visible→hidden persists (still evaluated), hidden→archived (excluded from progress.achievements[]), archived→visible works.",
+    "PUT /api/achievements/order": "PASS – reordered ids, list returns new order sorted by display_order.",
+    "New requirement types": "PASS – win_count, loss_count, daily_pnl, weekly_pnl, monthly_pnl, avg_rr, rr_above(meta=1), tag_used(meta='plan followed'), avoid_tag(meta='revenge') all report positive current on demo data.",
+    "achievementsSummary": "PASS – total counts visible-status only.",
+    "Main News UI (dashboard)": "PASS – data-testid main-news, main-news-currency shows 'USD', main-news-countdown '3d 20h', main-news-menu opens with USD/EUR/GBP/JPY/AUD/CAD/CHF/NZD, selecting EUR switches event, reload persists EUR (settings.mainNewsCurrency), switch back to USD OK.",
+    "Milestones customize panel": "PASS – 5 global toggles present, 15 manage-row rows with SYSTEM badge, duplicate → 16 rows with CUSTOM badge and '— Custom' suffix, vis-ach cycles visibility (hidden removes from main grid), del-ach + confirm-del removes row and shows 'Milestone removed' toast.",
+    "Multi-condition builder & detail": "PASS – ab-multi reveals ab-cond-0, ab-add-cond adds ab-cond-1, ab-save creates milestone with CUSTOM+MULTI badges in grid; achievement-detail shows '2 / 2 conditions complete', per-condition checklist and '+150 XP' reward."
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_progress_v2.py",
+    "/app/backend/tests/test_progress.py",
+    "/app/test_reports/pytest/pytest_v2.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "progress.compute_progress evaluated[] still INCLUDES hidden milestones (only archived skipped). The frontend filters status=='visible' for the grid, but any consumer that iterates progress.achievements[] and doesn't filter by status will see hidden ones. Consider either excluding hidden from evaluated too, or documenting that consumers must filter.",
+    "server.py update_achievement always resets unlocked_at=None on any PUT (including a pure status change). This causes brief 'newly unlocked' toast churn on the very next /api/progress call for already-satisfied milestones when users flip visibility. Consider only resetting unlocked_at when requirement_* fields actually changed.",
+    "server.py reorder_achievements has no ownership guard beyond user_id in the update filter — good — but it accepts arbitrary ids and silently no-ops on foreign ids. Consider returning a summary { updated: N } so the frontend can detect partial failures.",
+    "AchievementBuilder ab-multi condition rows default requirement_type to 'trade_count' with same value; when user adds condition rows without editing, /api/progress still evaluates all conditions as duplicates — evaluation is correct but UX-wise a distinct requirement_type per row would be nicer. Not a blocker.",
+    "AchievementIn.conditions is Optional[List[ConditionIn]] but stored on the DB doc via body.dict() → dict-serialized; downstream evaluate_achievement reads .get('requirement_type') on each dict — works, just noting the polymorphism."
+  ],
+  "updated_files": ["/app/backend/tests/test_progress_v2.py (new)"],
+  "success_rate": {"backend": "100% (19/19 new + 6/6 existing)", "frontend": "100% (all acceptance flows)"},
+  "test_credentials": "admin@tradesentinel.com / Sentinel@2025 (from /app/memory/test_credentials.md). Login response key is 'token'.",
+  "seed_data_creation": "POST /api/trades/demo used (10 demo trades). All TEST_* and '— Custom' milestones created during tests are cleaned up by the pytest fixtures and by the Playwright script.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Main News + Milestone Management + Multi-Condition + new requirement types are fully working (backend + frontend). Notes: (1) Milestones page path is /milestones (not /progress); (2) run pytest without -o override, pytest.ini already sets -n 2 --dist loadscope; (3) new backend test file /app/backend/tests/test_progress_v2.py; (4) frontend testids: main-news, main-news-currency, main-news-menu, main-news-cur-{USD|EUR|GBP|JPY|AUD|CAD|CHF|NZD}, main-news-countdown, main-news-live, main-news-empty; customize-panel, manage-row-{id}, vis-ach-{id}, dup-ach-{id}, edit-ach-{id}, del-ach-{id}, confirm-del-{id}, create-achievement-btn; achievement-builder, ab-title, ab-desc, ab-xp, ab-multi, ab-cond-{i}, ab-add-cond, ab-icon-{Name}, ab-save, ab-cancel; achievement-{id}, achievement-detail.",
+  "rca of the issue": "N/A – no functional bugs found."
+}

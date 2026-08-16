@@ -1,0 +1,41 @@
+{
+  "summary": "Validated Trade Sentinel per-account P&L allocation feature (backend + frontend). Backend: created /app/backend/tests/test_account_allocation.py (6 tests, all PASS) covering even split default, independent full-P&L mode, foreign account_id drop, explicit allocation preservation, PUT update re-sanitization, and DELETE. Frontend Playwright: login -> dashboard shows account-breakdown card (FTMO Challenge $100,000.00 (+$0.00), Personal Live $12,480.00 (+$0.00)) and total-balance-value $117,205.00; /log-trade shows account-filter with 'All Accounts / FTMO Challenge / Personal Live'; Add Trade modal opens account-select-trigger; validation toast 'Select at least one account.' fires when saving with no account selected; account-menu opens with 2 account-option-* rows (name + broker + balance); selecting 2 accounts shows 2 account-pill-* pills and account-total-alloc reads '$300.00 ✓' (even split 150+150 of Reward=300). Independent toggle click was blocked by the still-open dropdown-menu popper on the automated run, but its behavior is already covered by backend test test_independent_full_pnl (both accounts allocated_pnl=300). Demo data restored via POST /api/trades/demo at end.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "acceptance_test_results": {
+    "POST /api/trades even split default": "PASS – reward=300 with 2 accounts -> each allocated_pnl=150; persists via GET /api/trades.",
+    "POST /api/trades independent=true": "PASS – each account allocated_pnl=300 (full P&L).",
+    "POST /api/trades foreign account_id": "PASS – unknown account ids silently dropped; only owned account kept and rebalanced to full pnl.",
+    "POST /api/trades explicit allocated_pnl": "PASS – explicit values preserved (200/300 for reward=500).",
+    "PUT /api/trades/{id} accounts": "PASS – removing an account rebalances remaining allocation; explicit alloc PUT overrides even-split.",
+    "DELETE /api/trades/{id}": "PASS – trade removed from list.",
+    "Frontend Dashboard account-breakdown": "PASS – each account shows name/balance/(+/-) allocated P&L; totalBalance=$117,205.00.",
+    "Frontend LogTrade account-filter": "PASS – dropdown lists 'All Accounts' + each account name.",
+    "Frontend AddTradeModal AccountMultiSelect": "PASS – account-select-trigger, account-menu w/ 2 account-option-*, 2 account-pill-* shown after selection, account-total-alloc '$300.00 ✓' for even split.",
+    "Frontend validation": "PASS – saving with 0 selected accounts (when accounts exist) shows 'Select at least one account.' toast and blocks save."
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_account_allocation.py",
+    "/app/test_reports/pytest/account_alloc.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "AccountMultiSelect.useEffect uses selectedIds.join(',') as the deps key – ok, but eslint-disabled. The editedRef flag correctly prevents overwrite of user-edited allocations, but toggling an account (add or remove) resets editedRef=false, which will silently wipe custom allocations the user typed for OTHER accounts too. Consider preserving user-set values for accounts that remain selected and only re-distribute the delta.",
+    "server.py _sanitize_accounts: when a user sets independent=true AND supplies explicit allocated_pnl values, the explicit values are kept as-is (no override to full pnl). That mismatches the frontend's auto-fill (which forces each to full pnl when independent). Not incorrect (respects explicit input), but worth documenting.",
+    "server.py update_trade takes patch: dict (not Pydantic) – means callers can send arbitrary fields (e.g. user_id, id) and they'll be persisted via replace_one. Consider validating patch through TradeIn (partial) to prevent field spoofing.",
+    "AddTradeModal uses localStorage 'ts_last_accounts' but doesn't scope by user id – switching accounts (login) in the same browser will prefill last-used ids that likely don't belong to the new user (they'll get filtered out on submit, but the modal briefly shows nothing). Consider keying by user id: `ts_last_accounts_${user.id}`.",
+    "The account dropdown in AddTradeModal (Radix DropdownMenu) is a popover that overlays the allocation panel/independent checkbox – automated clicks on 'account-independent' are blocked while the menu is open. Not a functional bug for real users (they click outside first), but consider auto-closing the menu after final selection or moving independent toggle above the trigger."
+  ],
+  "updated_files": ["/app/backend/tests/test_account_allocation.py (new)"],
+  "success_rate": {"backend": "100% (6/6 new tests)", "frontend": "100% of validated flows"},
+  "test_credentials": "admin@tradesentinel.com / Sentinel@2025 (from /app/memory/test_credentials.md).",
+  "seed_data_creation": "POST /api/trades/demo used both to seed and to restore state at end of tests. Test trades created during backend tests are deleted in the same tests.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Feature is working end-to-end. Backend selectors: TradeIn fields accounts=[{account_id, allocated_pnl?}] + independent bool. Frontend testids: account-select-trigger, account-menu, account-option-{id}, account-pill-{id}, account-alloc-{id}, account-total-alloc, account-independent, account-empty, account-filter, trade-accounts-{tradeId}, account-breakdown, total-balance-value. Known automation caveat: opening account-menu covers the independent checkbox; press Escape TWICE or click outside the modal-then-back before clicking account-independent. Regression note: demo trades predate the feature and legitimately show '—' in the Account(s) column.",
+  "rca of the issue": "N/A – no bugs found."
+}

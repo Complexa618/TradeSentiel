@@ -95,7 +95,20 @@ export function computeStats(trades) {
 }
 
 // Sum of realized P&L across all closed trades
-export const realizedPnl = (trades) => closedTrades(trades).reduce((s, t) => s + Number(t.pnl || 0), 0);
+// Allocation-aware P&L: sum of a trade's per-account allocations, else the trade's own P&L.
+export const tradeAllocated = (t) => {
+  const accs = t.accounts || [];
+  if (accs.length) return accs.reduce((s, a) => s + Number(a.allocated_pnl || 0), 0);
+  return Number(t.pnl || 0);
+};
+export const realizedPnl = (trades) => closedTrades(trades).reduce((s, t) => s + tradeAllocated(t), 0);
+
+// Realized P&L for a single account (only its allocated share of each closed trade).
+export const accountPnl = (accountId, trades) => closedTrades(trades).reduce((s, t) => {
+  const a = (t.accounts || []).find((x) => x.account_id === accountId);
+  return s + (a ? Number(a.allocated_pnl || 0) : 0);
+}, 0);
+export const accountBalance = (account, trades) => Number(account.balance || 0) + accountPnl(account.id, trades);
 
 // Sum of account starting balances (baseline capital)
 export const startingBalance = (accounts = []) => accounts.reduce((s, a) => s + Number(a.balance || 0), 0);

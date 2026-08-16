@@ -163,46 +163,79 @@ def _discipline(closed):
     return {"score": score, "label": label, "factors": factors}
 
 
-def evaluate_achievement(defn, ctx):
-    rtype = defn.get("requirement_type")
-    target = _num(defn.get("requirement_value"))
-    meta = defn.get("requirement_meta")
+def _eval_single(rtype, target, meta, ctx):
+    closed = ctx["closed"]
     current = 0.0
     unlocked = False
     if rtype == "trade_count":
         current = ctx["total"]
+    elif rtype == "win_count":
+        current = ctx["wins"]
+    elif rtype == "loss_count":
+        current = ctx["losses"]
     elif rtype == "win_streak":
         current = ctx["streaks"]["bestWin"]
     elif rtype == "profit":
         current = ctx["netPL"]
+    elif rtype == "daily_pnl":
+        current = ctx["bestDayPnl"]
+    elif rtype == "weekly_pnl":
+        current = ctx["bestWeekPnl"]
+    elif rtype == "monthly_pnl":
+        current = ctx["bestMonthPnl"]
     elif rtype == "win_rate":
         current = ctx["winRate"]
         unlocked = ctx["total"] >= 10 and current >= target
+    elif rtype == "avg_rr":
+        current = ctx["avgR"]
+    elif rtype == "rr_above":
+        thr = _num(meta) if meta else 1
+        current = sum(1 for t in closed if _num(t.get("rMultiple")) >= thr)
     elif rtype == "session_count":
-        current = sum(1 for t in ctx["closed"] if (t.get("session") or "") == meta)
+        current = sum(1 for t in closed if (t.get("session") or "") == meta)
     elif rtype == "strategy_count":
         m = (meta or "").strip().lower()
-        current = sum(1 for t in ctx["closed"] if m in [str(s).strip().lower() for s in (t.get("strategies") or [])])
+        current = sum(1 for t in closed if m in [str(s).strip().lower() for s in (t.get("strategies") or [])])
+    elif rtype == "strategy_pnl":
+        m = (meta or "").strip().lower()
+        current = round(sum(_num(t.get("pnl")) for t in closed if m in [str(s).strip().lower() for s in (t.get("strategies") or [])]), 2)
     elif rtype == "journal_trades":
         current = ctx["journalTrades"]
+    elif rtype == "screenshots":
+        current = ctx["mediaTrades"]
     elif rtype == "plan_followed":
         current = ctx["planFollowed"]
     elif rtype == "no_revenge":
         current = ctx["noRevenge"]
+    elif rtype == "avoid_tag":
+        m = (meta or "").strip().lower()
+        current = sum(1 for t in closed if m and m not in _tags(t))
+    elif rtype == "tag_used":
+        m = (meta or "").strip().lower()
+        current = sum(1 for t in closed if m and m in _tags(t))
     elif rtype == "active_days":
         current = ctx["activeDays"]
-    elif rtype == "screenshots":
-        current = ctx["mediaTrades"]
     if rtype != "win_rate":
         unlocked = target > 0 and current >= target
     pct = 100.0 if unlocked else (min(current / target, 1.0) * 100 if target > 0 else 0)
-    return {
-        "current": round(current, 2),
-        "target": round(target, 2),
-        "percent": round(pct, 1),
-        "unlocked": unlocked,
-        "remaining": round(max(target - current, 0), 2),
-    }
+    return {"current": round(current, 2), "target": round(target, 2), "percent": round(pct, 1),
+            "unlocked": unlocked, "remaining": round(max(target - current, 0), 2)}
+
+
+def evaluate_achievement(defn, ctx):
+    conds = defn.get("conditions") or []
+    if conds:
+        results, done = [], 0
+        for c in conds:
+            r = _eval_single(c.get("requirement_type"), _num(c.get("requirement_value")), c.get("requirement_meta"), ctx)
+            if r["unlocked"]:
+                done += 1
+            results.append({"requirement_type": c.get("requirement_type"), "requirement_meta": c.get("requirement_meta"), "label": c.get("label"), **r})
+        total = len(conds)
+        return {"current": done, "target": total, "percent": round(done / total * 100, 1) if total else 0,
+                "unlocked": done == total and total > 0, "remaining": total - done, "conditions": results, "multi": True}
+    r = _eval_single(defn.get("requirement_type"), _num(defn.get("requirement_value")), defn.get("requirement_meta"), ctx)
+    return {**r, "conditions": [], "multi": False}
 
 
 def compute_context(trades):
@@ -212,6 +245,9 @@ def compute_context(trades):
     losses = [t for t in closed if _num(t.get("pnl")) < 0]
     net = round(sum(_num(t.get("pnl")) for t in closed), 2)
     rmults = [_num(t.get("rMultiple")) for t in closed if t.get("rMultiple") is not None]
+    by_day = _group_pnl(closed, _day_of)
+    by_week = _group_pnl(closed, lambda t: _iso_week(_day_of(t)))
+    by_month = _group_pnl(closed, lambda t: _month(_day_of(t)))
     return {
         "closed": closed,
         "total": n,
@@ -226,6 +262,9 @@ def compute_context(trades):
         "noRevenge": sum(1 for t in closed if REVENGE_TAG not in _tags(t)),
         "activeDays": len({_day_of(t) for t in closed if _day_of(t)}),
         "mediaTrades": sum(1 for t in closed if _has_media(t)),
+        "bestDayPnl": round(max((v["pnl"] for v in by_day.values()), default=0), 2),
+        "bestWeekPnl": round(max((v["pnl"] for v in by_week.values()), default=0), 2),
+        "bestMonthPnl": round(max((v["pnl"] for v in by_month.values()), default=0), 2),
     }
 
 
@@ -329,28 +368,34 @@ def compute_progress(trades, goals, achievements, prefs):
 
     goal_list, completed_goals = compute_goals(goals, ctx)
 
-    # Evaluate achievements (against active ones)
+    # Evaluate achievements (skip archived; hidden are evaluated but excluded from the grid summary)
     evaluated = []
-    unlocked_count = 0
+    unlocked_count = 0        # visible unlocked (for summary)
+    xp_from_ach = 0
     newly_unlocked = []
     for a in achievements:
-        if not a.get("is_active", True):
+        status = a.get("status") or ("visible" if a.get("is_active", True) else "hidden")
+        if status == "archived":
             continue
         res = evaluate_achievement(a, ctx)
-        item = {**a, **res}
+        item = {**a, **res, "status": status, "is_system": not a.get("is_custom", False)}
         was_unlocked = bool(a.get("unlocked_at"))
         if res["unlocked"]:
-            unlocked_count += 1
+            xp_from_ach += _num(a.get("xp_reward")) or xp_cfg["achievement"]
+            if status == "visible":
+                unlocked_count += 1
             if not was_unlocked:
                 newly_unlocked.append(a["id"])
                 item["_set_unlocked_at"] = True
         elif was_unlocked:
-            item["_clear_unlocked_at"] = True  # regressed (e.g. trades deleted)
+            item["_clear_unlocked_at"] = True
         evaluated.append(item)
+
+    visible_total = len([a for a in evaluated if a.get("status") == "visible"])
 
     xp = (ctx["total"] * xp_cfg["trade"] + ctx["journalTrades"] * xp_cfg["journal"] +
           ctx["mediaTrades"] * xp_cfg["screenshot"] + ctx["planFollowed"] * xp_cfg["plan"] +
-          completed_goals * xp_cfg["goal"] + unlocked_count * xp_cfg["achievement"])
+          completed_goals * xp_cfg["goal"] + xp_from_ach)
 
     # Daily / weekly / monthly
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -382,7 +427,7 @@ def compute_progress(trades, goals, achievements, prefs):
         "goals": goal_list,
         "completedGoals": completed_goals,
         "achievements": evaluated,
-        "achievementsSummary": {"unlocked": unlocked_count, "total": len([a for a in achievements if a.get("is_active", True)])},
+        "achievementsSummary": {"unlocked": unlocked_count, "total": visible_total},
         "newlyUnlocked": newly_unlocked,
         "prefs": prefs,
     }

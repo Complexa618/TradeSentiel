@@ -20,17 +20,39 @@ export function Icon({ name, className }) {
 export const CATEGORIES = ['Trading', 'Discipline', 'Consistency', 'Strategy', 'Sessions', 'Journaling', 'Profitability', 'Risk Management', 'Personal Records'];
 
 export const REQUIREMENT_TYPES = [
-  { value: 'trade_count', label: 'Number of trades' },
-  { value: 'win_streak', label: 'Win streak length' },
+  { value: 'trade_count', label: 'Total trades' },
+  { value: 'win_count', label: 'Winning trades' },
+  { value: 'loss_count', label: 'Losing trades' },
   { value: 'profit', label: 'Net profit ($)' },
+  { value: 'daily_pnl', label: 'Best day P&L ($)' },
+  { value: 'weekly_pnl', label: 'Best week P&L ($)' },
+  { value: 'monthly_pnl', label: 'Best month P&L ($)' },
+  { value: 'win_streak', label: 'Win streak length' },
   { value: 'win_rate', label: 'Win rate (%) — 10+ trades' },
+  { value: 'avg_rr', label: 'Average R:R' },
+  { value: 'rr_above', label: 'Trades above an R:R' },
   { value: 'session_count', label: 'Trades in a session' },
   { value: 'strategy_count', label: 'Trades with a strategy' },
+  { value: 'strategy_pnl', label: 'Profit with a strategy ($)' },
   { value: 'journal_trades', label: 'Journaled trades (with notes)' },
+  { value: 'screenshots', label: 'Trades with media attached' },
   { value: 'plan_followed', label: "Trades tagged 'Plan Followed'" },
   { value: 'no_revenge', label: "Trades without 'Revenge'" },
+  { value: 'tag_used', label: 'Trades using a tag' },
+  { value: 'avoid_tag', label: 'Trades avoiding a tag' },
   { value: 'active_days', label: 'Active trading days' },
-  { value: 'screenshots', label: 'Trades with media attached' },
+];
+
+// Which requirement types need an extra "meta" value, and what kind of picker.
+export const metaKind = (rtype) => ({
+  session_count: 'session', strategy_count: 'strategy', strategy_pnl: 'strategy',
+  tag_used: 'tag', avoid_tag: 'tag', rr_above: 'rr',
+}[rtype] || null);
+
+export const VISIBILITY = [
+  { value: 'visible', label: 'Visible' },
+  { value: 'hidden', label: 'Hidden' },
+  { value: 'archived', label: 'Archived' },
 ];
 
 const easeOut = (t) => 1 - Math.pow(1 - t, 3);

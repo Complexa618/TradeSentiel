@@ -4,11 +4,15 @@ import { useApp } from '../context/AppContext';
 import { SESSIONS, COMMON_TAGS, SYMBOLS } from '../mock';
 import { computeTradeMetrics, fmtMoney, fmtR, fmtDuration } from '../lib/calc';
 import { TrendingUp, TrendingDown, Upload, X, Check, Clock } from 'lucide-react';
+import { toast } from 'sonner';
 import StrategyTagInput from './StrategyTagInput';
 import DarkSelect from './DarkSelect';
 import DatePicker from './DatePicker';
 import TimeField from './TimeField';
 import TradePhotos from './TradePhotos';
+import AccountMultiSelect from './AccountMultiSelect';
+
+const LAST_ACCTS_KEY = 'ts_last_accounts';
 
 const todayStr = () => {
   const d = new Date();
@@ -57,16 +61,35 @@ const combine = (day, time) => {
 };
 
 export default function AddTradeModal({ open, onClose, trade = null }) {
-  const { addTrade, updateTrade, uploadPhotos } = useApp();
+  const { addTrade, updateTrade, uploadPhotos, data, setSettings } = useApp();
   const isEdit = !!trade;
   const [form, setForm] = useState(makeEmpty);
   const [pending, setPending] = useState([]);
+  const [accounts, setAccounts] = useState([]);       // [{account_id, allocated_pnl}]
+  const [independent, setIndependent] = useState(false);
   const fileRef = useRef();
+  const settings = data.settings || {};
+  const userAccounts = data.accounts || [];
 
   // Prefill when opening; reset when closing
   useEffect(() => {
-    if (open) { setForm(trade ? fromTrade(trade) : makeEmpty()); setPending([]); }
-  }, [open, trade]);
+    if (!open) return;
+    setForm(trade ? fromTrade(trade) : makeEmpty());
+    setPending([]);
+    if (trade) {
+      setAccounts(trade.accounts || []);
+      setIndependent(!!trade.independent);
+    } else {
+      // Remember last used accounts if enabled
+      let init = [];
+      if (settings.rememberLastAccounts !== false) {
+        try { init = JSON.parse(localStorage.getItem(LAST_ACCTS_KEY) || '[]'); } catch { init = []; }
+        init = init.filter((id) => userAccounts.some((a) => a.id === id)).map((id) => ({ account_id: id, allocated_pnl: null }));
+      }
+      setAccounts(init);
+      setIndependent(false);
+    }
+  }, [open, trade]); // eslint-disable-line
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -87,6 +110,10 @@ export default function AddTradeModal({ open, onClose, trade = null }) {
 
   const submit = async (e) => {
     e.preventDefault();
+    if (userAccounts.length && !accounts.length && settings.allowTradesWithoutAccount !== true) {
+      toast.error('Select at least one account.');
+      return;
+    }
     const payload = {
       symbol: form.symbol, direction: form.direction, status: form.status,
       tags: form.tags, notes: form.notes,
@@ -98,7 +125,12 @@ export default function AddTradeModal({ open, onClose, trade = null }) {
       date: form.day ? new Date(`${form.day}T00:00:00`).toISOString() : new Date().toISOString(),
       entryTime: entryISO,
       exitTime: exitISO,
+      accounts: accounts.map((a) => ({ account_id: a.account_id, allocated_pnl: a.allocated_pnl })),
+      independent,
     };
+    if (settings.rememberLastAccounts !== false) {
+      try { localStorage.setItem(LAST_ACCTS_KEY, JSON.stringify(accounts.map((a) => a.account_id))); } catch { /* ignore */ }
+    }
     if (isEdit) {
       await updateTrade(trade.id, payload);
     } else {
@@ -170,6 +202,12 @@ export default function AddTradeModal({ open, onClose, trade = null }) {
               <Lbl>Session</Lbl>
               <DarkSelect value={form.session} onValueChange={(v) => set('session', v)} options={SESSIONS} triggerClassName="w-full" />
             </div>
+          </div>
+
+          <div>
+            <Lbl>Account(s)</Lbl>
+            <AccountMultiSelect accounts={userAccounts} value={accounts} onChange={setAccounts}
+              pnl={preview.pnl} independent={independent} onIndependent={setIndependent} />
           </div>
 
           <div>

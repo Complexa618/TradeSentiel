@@ -119,6 +119,8 @@ class TradeIn(BaseModel):
     tags: List[str] = []
     notes: str = ""
     screenshot: Optional[str] = None
+    accounts: List[dict] = []
+    independent: bool = False
 
 class AccountIn(BaseModel):
     name: str
@@ -128,6 +130,9 @@ class AccountIn(BaseModel):
 class SettingsIn(BaseModel):
     hideBalance: Optional[bool] = None
     hideUsername: Optional[bool] = None
+    mainNewsCurrency: Optional[str] = None
+    rememberLastAccounts: Optional[bool] = None
+    allowTradesWithoutAccount: Optional[bool] = None
 
 
 # ---------------- Helpers ----------------
@@ -310,6 +315,28 @@ async def list_trades(user: dict = Depends(get_current_user)):
     trades = await db.trades.find({"user_id": user["id"]}).sort("date", -1).to_list(2000)
     return [clean(t) for t in trades]
 
+async def _sanitize_accounts(trade, user_id):
+    """Keep only accounts the user owns; default allocations from the trade's realized P&L."""
+    raw = trade.get("accounts") or []
+    independent = bool(trade.get("independent"))
+    owned = {a["id"] async for a in db.accounts.find({"user_id": user_id}, {"id": 1})}
+    seen, cleaned = set(), []
+    for entry in raw:
+        aid = entry.get("account_id") if isinstance(entry, dict) else entry
+        if aid not in owned or aid in seen:
+            continue
+        seen.add(aid)
+        cleaned.append({"account_id": aid, "allocated_pnl": entry.get("allocated_pnl") if isinstance(entry, dict) else None})
+    pnl = float(trade.get("pnl") or 0)
+    n = len(cleaned)
+    for i, c in enumerate(cleaned):
+        if c["allocated_pnl"] is None:
+            c["allocated_pnl"] = round(pnl, 2) if independent else round(pnl / n, 2) if n else 0
+        else:
+            c["allocated_pnl"] = round(float(c["allocated_pnl"]), 2)
+    trade["accounts"] = cleaned
+    trade["independent"] = independent
+
 @api.post("/trades")
 async def create_trade(body: TradeIn, user: dict = Depends(get_current_user)):
     trade = body.dict()
@@ -317,6 +344,7 @@ async def create_trade(body: TradeIn, user: dict = Depends(get_current_user)):
     trade["user_id"] = user["id"]
     trade["createdAt"] = now_iso()
     derive(trade)
+    await _sanitize_accounts(trade, user["id"])
     await db.trades.insert_one(dict(trade))
     return clean(trade)
 
@@ -327,6 +355,7 @@ async def update_trade(trade_id: str, patch: dict, user: dict = Depends(get_curr
         raise HTTPException(status_code=404, detail="Trade not found")
     existing.update(patch)
     derive(existing)
+    await _sanitize_accounts(existing, user["id"])
     await db.trades.replace_one({"id": trade_id, "user_id": user["id"]}, {k: v for k, v in existing.items() if k != "_id"})
     return clean(existing)
 
@@ -421,6 +450,12 @@ DEFAULT_PROGRESS_PREFS = {
 }
 PROGRESS_TOGGLES = {"achievementsEnabled", "streaksEnabled", "xpEnabled", "disciplineEnabled", "notificationsEnabled"}
 
+class ConditionIn(BaseModel):
+    requirement_type: str = "trade_count"
+    requirement_value: float = 1
+    requirement_meta: Optional[str] = None
+    label: Optional[str] = None
+
 class AchievementIn(BaseModel):
     title: str
     description: str = ""
@@ -429,7 +464,9 @@ class AchievementIn(BaseModel):
     requirement_type: str = "trade_count"
     requirement_value: float = 1
     requirement_meta: Optional[str] = None
-    is_active: bool = True
+    conditions: Optional[List[ConditionIn]] = None
+    xp_reward: float = 0
+    status: str = "visible"
     display_order: Optional[int] = None
 
 def _prefs_of(user: dict) -> dict:
@@ -451,7 +488,8 @@ async def _ensure_default_achievements(uid: str):
         docs.append({
             "id": "ach_" + uuid.uuid4().hex[:10], "user_id": uid, "title": title, "description": desc,
             "category": cat, "icon": icon, "requirement_type": rtype, "requirement_value": float(rval),
-            "requirement_meta": meta, "is_active": True, "is_custom": False, "display_order": i,
+            "requirement_meta": meta, "conditions": [], "xp_reward": 0, "status": "visible",
+            "is_custom": False, "display_order": i,
             "unlocked_at": None, "created_at": now_iso(), "updated_at": now_iso(),
         })
     if docs:
@@ -503,6 +541,31 @@ async def create_achievement(body: AchievementIn, user: dict = Depends(get_curre
     await db.achievements.insert_one(dict(doc))
     return clean(doc)
 
+@api.put("/achievements/order")
+async def reorder_achievements(order: List[str], user: dict = Depends(get_current_user)):
+    for i, aid in enumerate(order):
+        await db.achievements.update_one({"id": aid, "user_id": user["id"]}, {"$set": {"display_order": i}})
+    return {"ok": True}
+
+@api.post("/achievements/{aid}/duplicate")
+async def duplicate_achievement(aid: str, user: dict = Depends(get_current_user)):
+    a = await db.achievements.find_one({"id": aid, "user_id": user["id"]})
+    if not a:
+        raise HTTPException(status_code=404, detail="Achievement not found")
+    count = await db.achievements.count_documents({"user_id": user["id"]})
+    dup = {**a}
+    dup.pop("_id", None)
+    dup["id"] = "ach_" + uuid.uuid4().hex[:10]
+    dup["title"] = f"{a.get('title', 'Milestone')} — Custom"
+    dup["is_custom"] = True
+    dup["status"] = "visible"
+    dup["unlocked_at"] = None
+    dup["display_order"] = count
+    dup["created_at"] = now_iso()
+    dup["updated_at"] = now_iso()
+    await db.achievements.insert_one(dict(dup))
+    return clean(dup)
+
 @api.put("/achievements/{aid}")
 async def update_achievement(aid: str, body: AchievementIn, user: dict = Depends(get_current_user)):
     a = await db.achievements.find_one({"id": aid, "user_id": user["id"]})
@@ -510,7 +573,15 @@ async def update_achievement(aid: str, body: AchievementIn, user: dict = Depends
         raise HTTPException(status_code=404, detail="Achievement not found")
     patch = {k: v for k, v in body.dict().items() if v is not None or k == "requirement_meta"}
     patch["updated_at"] = now_iso()
-    patch["unlocked_at"] = None  # re-evaluate against the new requirement
+    # Only re-evaluate (clear unlock) when the requirement actually changed, not on a pure status/visibility edit.
+    req_changed = (
+        patch.get("requirement_type") != a.get("requirement_type")
+        or patch.get("requirement_value") != a.get("requirement_value")
+        or patch.get("requirement_meta") != a.get("requirement_meta")
+        or (patch.get("conditions") or []) != (a.get("conditions") or [])
+    )
+    if req_changed:
+        patch["unlocked_at"] = None
     await db.achievements.update_one({"id": aid, "user_id": user["id"]}, {"$set": patch})
     updated = await db.achievements.find_one({"id": aid, "user_id": user["id"]})
     return clean(updated)

@@ -174,6 +174,8 @@ export function AppProvider({ children }) {
   const createAchievement = useCallback(async (body) => (await api.post('/achievements', body)).data, []);
   const updateAchievement = useCallback(async (id, body) => (await api.put(`/achievements/${id}`, body)).data, []);
   const deleteAchievement = useCallback(async (id) => (await api.delete(`/achievements/${id}`)).data, []);
+  const reorderAchievements = useCallback(async (ids) => (await api.put('/achievements/order', ids)).data, []);
+  const duplicateAchievement = useCallback(async (id) => (await api.post(`/achievements/${id}/duplicate`)).data, []);
   const saveProgressSettings = useCallback(async (body) => (await api.put('/progress/settings', body)).data, []);
 
   const value = useMemo(() => ({
@@ -182,8 +184,8 @@ export function AppProvider({ children }) {
     addTrade, updateTrade, deleteTrade, loadDemo, clearData,
     addAccount, deleteAccount, updateGoal, saveGoals, setSettings, fetchEconomicCalendar,
     uploadPhotos, listPhotos, deletePhoto, reorderPhotos,
-    getProgress, createAchievement, updateAchievement, deleteAchievement, saveProgressSettings,
-  }), [user, data, ready, signup, login, logout, googleLogin, addTrade, updateTrade, deleteTrade, loadDemo, clearData, addAccount, deleteAccount, updateGoal, saveGoals, setSettings, fetchEconomicCalendar, uploadPhotos, listPhotos, deletePhoto, reorderPhotos, getProgress, createAchievement, updateAchievement, deleteAchievement, saveProgressSettings]);
+    getProgress, createAchievement, updateAchievement, deleteAchievement, reorderAchievements, duplicateAchievement, saveProgressSettings,
+  }), [user, data, ready, signup, login, logout, googleLogin, addTrade, updateTrade, deleteTrade, loadDemo, clearData, addAccount, deleteAccount, updateGoal, saveGoals, setSettings, fetchEconomicCalendar, uploadPhotos, listPhotos, deletePhoto, reorderPhotos, getProgress, createAchievement, updateAchievement, deleteAchievement, reorderAchievements, duplicateAchievement, saveProgressSettings]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }

@@ -47,7 +47,8 @@ export default function Milestones() {
   }, [prog]);
   const shownAchievements = useMemo(() => {
     if (!prog) return [];
-    const list = cat === 'All' ? prog.achievements : prog.achievements.filter((a) => a.category === cat);
+    const visible = prog.achievements.filter((a) => (a.status || 'visible') === 'visible');
+    const list = cat === 'All' ? visible : visible.filter((a) => a.category === cat);
     return [...list].sort((a, b) => (b.unlocked - a.unlocked) || (b.percent - a.percent));
   }, [prog, cat]);
   const history = useMemo(() => {
@@ -243,9 +244,25 @@ export default function Milestones() {
               </DialogHeader>
               <div className="space-y-3">
                 <Row k="Category" v={detail.category} />
+                <Row k="Type" v={detail.is_system ? 'System milestone' : 'Custom milestone'} />
                 <Row k="Status" v={detail.unlocked ? 'Unlocked' : `${detail.percent}% complete`} tone={detail.unlocked ? 'emerald' : ''} />
-                <Row k="Progress" v={`${reqText(detail, detail.current)} / ${reqText(detail, detail.target)}`} />
-                {!detail.unlocked && <Row k="Remaining" v={reqText(detail, detail.remaining)} />}
+                {detail.multi ? (
+                  <div className="space-y-1.5 pt-1">
+                    <div className="text-xs text-gray-500">{detail.current} / {detail.target} conditions complete</div>
+                    {(detail.conditions || []).map((c, idx) => (
+                      <div key={idx} className="flex items-center justify-between text-sm rounded-lg bg-white/[0.02] px-3 py-1.5">
+                        <span className={c.unlocked ? 'text-emerald-300' : 'text-gray-400'}>{c.unlocked ? '✓' : '○'} {c.label || `${reqText(c, c.target)} ${c.requirement_type}`}</span>
+                        <span className="text-gray-500 font-mono-num text-xs">{reqText(c, c.current)} / {reqText(c, c.target)}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <>
+                    <Row k="Progress" v={`${reqText(detail, detail.current)} / ${reqText(detail, detail.target)}`} />
+                    {!detail.unlocked && <Row k="Remaining" v={reqText(detail, detail.remaining)} />}
+                  </>
+                )}
+                {detail.xp_reward > 0 && <Row k="XP reward" v={`+${detail.xp_reward} XP`} tone="emerald" />}
                 {detail.unlocked_at && <Row k="Unlocked" v={new Date(detail.unlocked_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} tone="emerald" />}
                 <AnimatedBar pct={detail.percent} height="h-2" />
               </div>
@@ -349,13 +366,15 @@ function AchievementCard({ a, onClick, newly }) {
           <div className="flex items-center gap-2 flex-wrap">
             <span className={`font-semibold ${a.unlocked ? 'text-white' : 'text-gray-400'}`}>{a.title}</span>
             {a.unlocked && <span className="text-[10px] font-semibold text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded">Unlocked</span>}
+            {!a.is_system && <span className="text-[9px] text-emerald-400/80 border border-emerald-500/30 rounded px-1">CUSTOM</span>}
+            {a.multi && <span className="text-[9px] text-sky-300/80 border border-sky-500/30 rounded px-1">MULTI</span>}
           </div>
           <p className="text-xs text-gray-500 mt-0.5">{a.description}</p>
           {!a.unlocked && (
             <div className="mt-2.5">
               <AnimatedBar pct={a.percent} height="h-1.5" />
               <div className="flex justify-between text-[11px] text-gray-500 mt-1 font-mono-num">
-                <span>{reqText(a, a.current)} / {reqText(a, a.target)}</span>
+                <span>{a.multi ? `${a.current} / ${a.target} conditions` : `${reqText(a, a.current)} / ${reqText(a, a.target)}`}</span>
                 <span>{Math.round(a.percent)}%</span>
               </div>
             </div>

@@ -12,8 +12,10 @@ export default function LogTrade() {
   const { openAddTrade, openEditTrade } = useOutletContext();
   const [sort, setSort] = useState('date');
   const [query, setQuery] = useState('');
+  const [acctFilter, setAcctFilter] = useState('all');
   const [viewImg, setViewImg] = useState(null);
   const [gallery, setGallery] = useState({ items: [], index: null });
+  const acctMap = useMemo(() => Object.fromEntries((data.accounts || []).map((a) => [a.id, a])), [data.accounts]);
   const openViewer = async (t) => {
     try {
       const photos = await listPhotos(t.id);
@@ -21,26 +23,36 @@ export default function LogTrade() {
     } catch { /* ignore */ }
   };
 
-  const trades = useMemo(() => {
-    let list = data.trades.filter((t) => {
+  const filtered = useMemo(() => {
+    return data.trades.filter((t) => {
       const strat = (t.strategies && t.strategies.length ? t.strategies.join(' ') : (t.strategy || '')).toLowerCase();
-      return t.symbol.toLowerCase().includes(query.toLowerCase()) || strat.includes(query.toLowerCase());
+      const matchesQuery = t.symbol.toLowerCase().includes(query.toLowerCase()) || strat.includes(query.toLowerCase());
+      const ids = (t.accounts || []).map((a) => a.account_id);
+      const matchesAcct = acctFilter === 'all' || ids.includes(acctFilter);
+      return matchesQuery && matchesAcct;
     });
-    list = [...list].sort((a, b) => {
+  }, [data.trades, query, acctFilter]);
+
+  const trades = useMemo(() => {
+    return [...filtered].sort((a, b) => {
       if (sort === 'symbol') return a.symbol.localeCompare(b.symbol);
       if (sort === 'pnl') return Number(b.pnl) - Number(a.pnl);
       if (sort === 'r') return Number(b.rMultiple) - Number(a.rMultiple);
       return new Date(b.date || b.entryTime) - new Date(a.date || a.entryTime);
     });
-    return list;
-  }, [data.trades, sort, query]);
+  }, [filtered, sort]);
 
+  const acctPnl = (t) => {
+    if (acctFilter === 'all') return Number(t.pnl || 0);
+    const a = (t.accounts || []).find((x) => x.account_id === acctFilter);
+    return a ? Number(a.allocated_pnl || 0) : Number(t.pnl || 0);
+  };
   const stats = useMemo(() => {
-    const closed = data.trades.filter((t) => t.status === 'closed');
+    const closed = filtered.filter((t) => t.status === 'closed');
     const wins = closed.filter((t) => Number(t.pnl) > 0).length;
-    const pnl = closed.reduce((s, t) => s + Number(t.pnl || 0), 0);
-    return { count: data.trades.length, pnl, win: closed.length ? (wins / closed.length) * 100 : 0 };
-  }, [data.trades]);
+    const pnl = closed.reduce((s, t) => s + acctPnl(t), 0);
+    return { count: filtered.length, pnl, win: closed.length ? (wins / closed.length) * 100 : 0 };
+  }, [filtered, acctFilter]);
 
   const exportCSV = () => {
     const headers = ['Symbol', 'Direction', 'Risk', 'Reward', 'Profit', 'RR', 'Strategy', 'Session', 'Entry Time', 'Exit Time', 'Duration', 'Status', 'Date'];
@@ -88,6 +100,13 @@ export default function LogTrade() {
               <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search symbol / strategy"
                 className="rounded-lg bg-white/[0.03] border border-white/[0.08] pl-8 pr-3 py-1.5 text-sm text-white placeholder:text-gray-600 focus:outline-none focus:border-emerald-500/50 transition w-56" />
             </div>
+            {(data.accounts || []).length > 0 && (
+              <select value={acctFilter} onChange={(e) => setAcctFilter(e.target.value)} data-testid="account-filter"
+                className="rounded-lg bg-white/[0.03] border border-white/[0.08] px-3 py-1.5 text-sm text-gray-200 focus:outline-none focus:border-emerald-500/50 transition">
+                <option value="all">All Accounts</option>
+                {(data.accounts || []).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+            )}
             <div className="flex gap-1 bg-white/[0.04] rounded-lg p-1">
               {Object.entries(SORTS).map(([k, l]) => (
                 <button key={k} onClick={() => setSort(k)} className={`px-2.5 py-1 rounded-md text-xs font-medium transition ${sort === k ? 'bg-emerald-500/20 text-emerald-300' : 'text-gray-500 hover:text-gray-300'}`}>{l}</button>
@@ -104,6 +123,7 @@ export default function LogTrade() {
                 <th className="px-4 py-3">Direction</th>
                 <th className="px-4 py-3 text-right">Risk / Reward</th>
                 <th className="px-4 py-3">Strategy</th>
+                <th className="px-4 py-3">Account(s)</th>
                 <th className="px-4 py-3">Session</th>
                 <th className="px-4 py-3">Duration</th>
                 <th className="px-4 py-3 text-right">RR</th>
@@ -135,10 +155,24 @@ export default function LogTrade() {
                       {!(t.strategies && t.strategies.length) && !t.strategy && <span className="text-gray-600">—</span>}
                     </div>
                   </td>
+                  <td className="px-4 py-3 text-gray-400">
+                    {(() => {
+                      const ids = (t.accounts || []).map((a) => a.account_id).filter((id) => acctMap[id]);
+                      if (!ids.length) return <span className="text-gray-600">—</span>;
+                      return (
+                        <div className="flex flex-wrap gap-1" data-testid={`trade-accounts-${t.id}`}>
+                          {ids.slice(0, 2).map((id) => (
+                            <span key={id} className="inline-flex rounded-md bg-white/[0.05] border border-white/[0.12] px-2 py-0.5 text-xs text-gray-200 whitespace-nowrap">{acctMap[id].name}</span>
+                          ))}
+                          {ids.length > 2 && <span className="inline-flex rounded-md bg-white/[0.05] border border-white/[0.12] px-2 py-0.5 text-xs text-gray-400" title={ids.map((id) => acctMap[id].name).join(', ')}>+{ids.length - 2}</span>}
+                        </div>
+                      );
+                    })()}
+                  </td>
                   <td className="px-4 py-3 text-gray-400">{t.session || '—'}</td>
                   <td className="px-4 py-3 text-gray-400 font-mono-num whitespace-nowrap">{fmtDuration(t)}</td>
                   <td className={`px-4 py-3 text-right font-mono-num ${t.rMultiple === null || t.rMultiple === undefined ? 'text-gray-500' : Number(t.rMultiple) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{fmtR(t.rMultiple)}</td>
-                  <td className={`px-4 py-3 text-right font-mono-num font-semibold ${Number(t.pnl) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{fmtMoney(t.pnl)}</td>
+                  <td className={`px-4 py-3 text-right font-mono-num font-semibold ${acctPnl(t) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{fmtMoney(acctPnl(t))}</td>
                   <td className="px-4 py-3 text-center">
                     {t.photoCount > 0 ? (
                       <button onClick={() => openViewer(t)} className="inline-flex items-center gap-1 text-emerald-400 hover:text-emerald-300 transition"><ImageIcon className="h-4 w-4" /><span className="text-xs font-mono-num">{t.photoCount}</span></button>
