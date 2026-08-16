@@ -5,7 +5,9 @@
       "framework": "create-react-app"
     },
     "backend": {
-      "root": "backend"
+      "root": "backend",
+      "runtime": "python",
+      "entrypoint": "server.py"
     }
   },
   "rewrites": [
